@@ -35,6 +35,32 @@ declare global {
 const hasSpeechRecognition = () =>
   typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
+const hasSpeechSynthesis = () => typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+const detectResponseLanguage = (text: string): 'hi' | 'en' => {
+  const hasDevanagari = /[\u0900-\u097F]/.test(text);
+  if (hasDevanagari) return 'hi';
+  const lower = text.toLowerCase();
+  if (/(mujhe|chahiye|paas|dhoondho|kal|tamatar|aloo|pyaaz|hai\b)/.test(lower)) return 'hi';
+  return 'en';
+};
+
+const getPreferredVoice = (lang: 'hi' | 'en'): SpeechSynthesisVoice | null => {
+  if (!hasSpeechSynthesis()) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  const langCodes = lang === 'hi' ? ['hi-IN', 'hi'] : ['en-IN', 'en-US', 'en-GB', 'en'];
+  for (const code of langCodes) {
+    const v = voices.find((voice) => voice.lang.toLowerCase().startsWith(code.toLowerCase()));
+    if (v) return v;
+  }
+  const googleHi = voices.find((v) => /hindi|google.*hi/i.test(`${v.name} ${v.lang}`));
+  if (lang === 'hi' && googleHi) return googleHi;
+  const googleEn = voices.find((v) => /google.*english|google.*india/i.test(`${v.name} ${v.lang}`));
+  if (googleEn) return googleEn;
+  return voices[0] ?? null;
+};
+
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedResult, onProceed }) => {
   const { language, setParsedIntent, setAssistantResponse, setLastSpokenText } = useDemo();
 
@@ -48,6 +74,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   const [response, setResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recognitionLang] = useState<RecognitionLang>('auto');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsEnabled] = useState(true);
 
   const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef<string>('');
@@ -58,6 +86,44 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     if (recognitionLang === 'en-IN') return 'en-IN';
     return language === 'hi' ? 'hi-IN' : 'en-IN';
   }, [recognitionLang, language]);
+
+  const speak = useCallback(
+    (text: string) => {
+      if (!ttsEnabled || !hasSpeechSynthesis() || !text) return;
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        const langHint = detectResponseLanguage(text);
+        utter.lang = langHint === 'hi' ? 'hi-IN' : 'en-IN';
+        utter.rate = langHint === 'hi' ? 0.95 : 0.98;
+        utter.pitch = 1;
+        utter.volume = 1;
+        const voice = getPreferredVoice(langHint);
+        if (voice) utter.voice = voice;
+        utter.onstart = () => setIsSpeaking(true);
+        utter.onend = () => setIsSpeaking(false);
+        utter.onerror = () => setIsSpeaking(false);
+        // Ensure voices are loaded (Chrome needs delay)
+        if (window.speechSynthesis.getVoices().length === 0) {
+          window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.speak(utter);
+          setTimeout(() => window.speechSynthesis.speak(utter), 250);
+        } else {
+          window.speechSynthesis.speak(utter);
+        }
+      } catch (e) {
+        console.warn('TTS failed', e);
+        setIsSpeaking(false);
+      }
+    },
+    [ttsEnabled]
+  );
+
+  const stopSpeaking = useCallback(() => {
+    if (hasSpeechSynthesis()) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+  }, []);
 
   const resetAll = useCallback(() => {
     setTranscript('');
@@ -93,6 +159,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       setError(null);
       setParsed(null);
       setResponse(null);
+      if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
 
       try {
         // STATE 4 -> 5: use existing service
@@ -102,11 +169,16 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setLastSpokenText(trimmed);
 
         if (!parsedIntent || parsedIntent.intent === 'UNKNOWN') {
-          // Still call assistant for friendly fallback, but show error style
-          const assistantMsg = await generateAssistantResponse(parsedIntent ?? { intent: 'UNKNOWN', product: null, quantity: null, unit: null, quality: null, location: null, date: null, price: null }, {}, trimmed);
+          const assistantMsg = await generateAssistantResponse(
+            parsedIntent ?? { intent: 'UNKNOWN', product: null, quantity: null, unit: null, quality: null, location: null, date: null, price: null },
+            {},
+            trimmed
+          );
           setResponse(assistantMsg);
           setAssistantResponse(assistantMsg);
           if (onParsedResult && parsedIntent) onParsedResult(parsedIntent, trimmed);
+          // Speak fallback response as well
+          setTimeout(() => speak(assistantMsg), 300);
           return;
         }
 
@@ -116,6 +188,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         const assistantMsg = await generateAssistantResponse(parsedIntent, {}, trimmed);
         setResponse(assistantMsg);
         setAssistantResponse(assistantMsg);
+        // SPEAK the AI response aloud – required for "I want 1 kg tomato" flow
+        setTimeout(() => speak(assistantMsg), 300);
       } catch (e) {
         console.error(e);
         setError(
@@ -127,7 +201,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setIsProcessing(false);
       }
     },
-    [language, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent]
+    [language, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak]
   );
 
   const stopListening = useCallback(() => {
@@ -151,6 +225,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       return;
     }
 
+    // Stop any ongoing speech before listening
+    stopSpeaking();
     setError(null);
     // keep transcript until new result, but clear interim/parsed/response for fresh attempt if user re-records
     setInterim('');
@@ -282,12 +358,18 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   };
 
   useEffect(() => {
+    // Preload voices
+    if (hasSpeechSynthesis()) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
     return () => {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
         } catch {}
       }
+      if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
     };
   }, []);
 
@@ -345,22 +427,24 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         {/* Microphone – visual focus */}
         <div className="my-8 relative flex flex-col items-center gap-3">
           <div className="relative flex items-center justify-center">
-            {(isListening || isProcessing) && (
-              <div className="absolute w-28 h-28 rounded-full bg-emerald-500/20 animate-ping" />
+            {(isListening || isProcessing || isSpeaking) && (
+              <div className={`absolute w-28 h-28 rounded-full animate-ping ${isSpeaking ? 'bg-teal-500/20' : 'bg-emerald-500/20'}`} />
             )}
             <button
-              onClick={isListening ? stopListening : startListening}
+              onClick={isListening ? stopListening : isSpeaking ? stopSpeaking : startListening}
               disabled={isProcessing}
-              aria-label={isListening ? 'Stop listening' : 'Tap to Speak'}
+              aria-label={isListening ? 'Stop listening' : isSpeaking ? 'Stop speaking' : 'Tap to Speak'}
               className={`relative w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl cursor-pointer focus:outline-none focus:ring-4 focus:ring-emerald-500/20 ${
                 isListening
                   ? 'bg-rose-500 text-white shadow-rose-500/30 scale-110'
                   : isProcessing
                     ? 'bg-amber-500 text-white shadow-amber-500/30 scale-105'
-                    : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/30 hover:scale-105 active:scale-95'
+                    : isSpeaking
+                      ? 'bg-teal-500 text-white shadow-teal-500/30 scale-105'
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/30 hover:scale-105 active:scale-95'
               }`}
             >
-              {isListening ? <MicOff size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : <Mic size={32} />}
+              {isListening ? <MicOff size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : isSpeaking ? <Volume2 size={32} className="animate-pulse" /> : <Mic size={32} />}
             </button>
           </div>
 
@@ -374,9 +458,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                   ? language === 'hi'
                     ? 'समझ रहा हूँ...'
                     : 'Understanding your request...'
-                  : language === 'hi'
-                    ? '🎙️ बोलने के लिए टैप करें'
-                    : '🎙️ Tap to Speak'}
+                  : isSpeaking
+                    ? language === 'hi'
+                      ? 'बोल रहा हूँ...'
+                      : 'Speaking...'
+                    : language === 'hi'
+                      ? '🎙️ बोलने के लिए टैप करें'
+                      : '🎙️ Tap to Speak'}
             </p>
             <p className="text-xs text-slate-500 mt-1">
               {isListening
@@ -572,12 +660,30 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         {showResponse && response && (
           <Card className="w-full max-w-lg mt-4 bg-emerald-500/10 border-emerald-500/20 p-4 text-left">
             <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-emerald-400 uppercase mb-2">
-              <Volume2 size={14} />
+              <Volume2 size={14} className={isSpeaking ? 'animate-pulse text-teal-400' : ''} />
               <span>{language === 'hi' ? 'सहायक प्रतिक्रिया' : 'Assistant Response'}</span>
+              {isSpeaking && <span className="ml-auto text-teal-400 animate-pulse text-[11px]">● Speaking</span>}
+              {!isSpeaking && (
+                <button
+                  onClick={() => speak(response)}
+                  className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
+                >
+                  {language === 'hi' ? 'फिर सुनें' : 'Replay'}
+                </button>
+              )}
+              {isSpeaking && (
+                <button
+                  onClick={stopSpeaking}
+                  className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300"
+                >
+                  Stop
+                </button>
+              )}
             </div>
             <p className="text-sm text-slate-100 leading-relaxed">{response}</p>
-            <p className="text-[11px] text-slate-500 mt-2">
-              {language === 'hi' ? 'generateAssistantResponse() द्वारा' : 'via generateAssistantResponse()'}
+            <p className="text-[11px] text-slate-500 mt-2 flex items-center gap-1">
+              {language === 'hi' ? 'generateAssistantResponse() द्वारा • ब्राउज़र TTS से बोला जा रहा है' : 'via generateAssistantResponse() • spoken with browser TTS'}
+              {isSpeaking && <span className="text-teal-400"> • {detectResponseLanguage(response) === 'hi' ? 'hi-IN' : 'en-IN'}</span>}
             </p>
           </Card>
         )}

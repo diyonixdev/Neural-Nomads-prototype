@@ -23,37 +23,34 @@ export const ConsumerVoicePage: React.FC = () => {
     [setParsedIntent, setLastSpokenText, setFarmerMatchResults]
   );
 
-  const handleFindFarmers = useCallback(async () => {
-    const requirement = parsedIntent;
-    if (!requirement) {
-      setFindError(language === 'hi' ? 'पहले अपनी आवश्यकता बोलें या टाइप करें।' : 'Please speak or type your requirement first.');
-      return;
-    }
-    if (requirement.intent !== 'BUYER') {
-      setFindError(
-        language === 'hi'
-          ? 'यह SELLER अनुरोध है — किसान मैच केवल BUYER के लिए है।'
-          : 'This is a SELLER request — farmer matching is for BUYER intent only.'
-      );
-      return;
-    }
-    if (!requirement.product) {
-      setFindError(language === 'hi' ? 'उत्पाद स्पष्ट नहीं — कृपया फसल का नाम बताएँ।' : 'Product not specified — please mention the crop name.');
-      return;
-    }
-    setIsFinding(true);
+  const handleFindFarmers = useCallback(() => {
     setFindError(null);
+    setIsFinding(true);
     try {
-      const results = matchFarmers(requirement);
-      setFarmerMatchResults(results);
+      const requirement = parsedIntent;
+      // If we have a valid BUYER requirement with product, pre-compute filtered results
+      // Otherwise navigate immediately and let Market page show general listings
+      // This ensures ALWAYS opens Market per spec, while still using requirement to filter when available
+      if (requirement && requirement.intent === 'BUYER' && requirement.product) {
+        const results = matchFarmers(requirement);
+        setFarmerMatchResults(results);
+      } else {
+        // No valid filter — clear previous filtered results so Market shows general Farmers Market
+        // Keep requirement in context if exists so Market can display banner/filter hint
+        setFarmerMatchResults([]);
+      }
+      // Always navigate immediately to existing Market page (reuses /consumer/matches)
+      // Browser back navigates to /consumer/voice correctly
       navigate('/consumer/matches');
     } catch (e) {
       console.error(e);
-      setFindError(language === 'hi' ? 'किसान खोजते समय त्रुटि हुई। कृपया फिर से प्रयास करें।' : 'Failed to find farmers. Please try again.');
+      // Even on error, still navigate to Market — show friendly message there
+      setFarmerMatchResults([]);
+      navigate('/consumer/matches');
     } finally {
       setIsFinding(false);
     }
-  }, [parsedIntent, language, setFarmerMatchResults, navigate]);
+  }, [parsedIntent, setFarmerMatchResults, navigate]);
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto animate-in fade-in duration-300">

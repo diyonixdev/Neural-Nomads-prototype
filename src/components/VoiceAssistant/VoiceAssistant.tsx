@@ -32,6 +32,8 @@ declare global {
   }
 }
 
+const SILENCE_TIMEOUT = 1500;
+
 const hasSpeechRecognition = () =>
   typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
@@ -64,7 +66,6 @@ const getPreferredVoice = (lang: 'hi' | 'en'): SpeechSynthesisVoice | null => {
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedResult, onProceed }) => {
   const { language, setParsedIntent, setAssistantResponse, setLastSpokenText } = useDemo();
 
-  // UI states as per spec: idle -> listening -> transcribed -> processing -> extracted -> ai response
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -80,6 +81,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef<string>('');
   const interimRef = useRef<string>('');
+  const silenceTimeoutRef = useRef<number | null>(null);
+  const isProcessingRef = useRef(false);
+  const hasProcessedRef = useRef(false);
 
   const getEffectiveSTTLang = useCallback((): string => {
     if (recognitionLang === 'hi-IN') return 'hi-IN';
@@ -87,26 +91,51 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     return language === 'hi' ? 'hi-IN' : 'en-IN';
   }, [recognitionLang, language]);
 
+  const clearSilenceTimeout = useCallback(() => {
+    if (silenceTimeoutRef.current !== null) {
+      window.clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
+    }
+  }, []);
+
+  const stopSpeaking = useCallback(() => {
+    if (hasSpeechSynthesis()) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+  }, []);
+
   const speak = useCallback(
     (text: string) => {
       if (!ttsEnabled || !hasSpeechSynthesis() || !text) return;
       try {
         window.speechSynthesis.cancel();
+        setIsListening(false);
         const utter = new SpeechSynthesisUtterance(text);
         const langHint = detectResponseLanguage(text);
         utter.lang = langHint === 'hi' ? 'hi-IN' : 'en-IN';
-        utter.rate = langHint === 'hi' ? 0.95 : 0.98;
+        utter.rate = 0.95;
         utter.pitch = 1;
         utter.volume = 1;
         const voice = getPreferredVoice(langHint);
         if (voice) utter.voice = voice;
-        utter.onstart = () => setIsSpeaking(true);
+        utter.onstart = () => {
+          setIsSpeaking(true);
+          setIsListening(false);
+        };
         utter.onend = () => setIsSpeaking(false);
         utter.onerror = () => setIsSpeaking(false);
-        // Ensure voices are loaded (Chrome needs delay)
         if (window.speechSynthesis.getVoices().length === 0) {
-          window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.speak(utter);
-          setTimeout(() => window.speechSynthesis.speak(utter), 250);
+          window.speechSynthesis.onvoiceschanged = () => {
+            try {
+              window.speechSynthesis.speak(utter);
+            } catch {}
+          };
+          setTimeout(() => {
+            try {
+              window.speechSynthesis.speak(utter);
+            } catch {}
+          }, 250);
         } else {
           window.speechSynthesis.speak(utter);
         }
@@ -118,14 +147,11 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     [ttsEnabled]
   );
 
-  const stopSpeaking = useCallback(() => {
-    if (hasSpeechSynthesis()) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    }
-  }, []);
-
   const resetAll = useCallback(() => {
+    clearSilenceTimeout();
+    hasProcessedRef.current = false;
+    isProcessingRef.current = false;
+    if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
     setTranscript('');
     setInterim('');
     finalTranscriptRef.current = '';
@@ -135,14 +161,14 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     setError(null);
     setIsProcessing(false);
     setIsListening(false);
-  }, []);
+    setIsSpeaking(false);
+  }, [clearSilenceTimeout]);
 
   const handleTryAgain = () => {
     resetAll();
     setTypedInput('');
   };
 
-  // Core: call existing services only (no regex/AI prompts here)
   const processTranscript = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -150,19 +176,22 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setError(
           language === 'hi'
             ? 'कृपया पहले बोलें या टाइप करें।'
-            : 'Please speak or type your requirement first.'
+            : "I didn't hear a request. Tap the microphone and try again."
         );
         return;
       }
 
+      if (isProcessingRef.current) return;
+      isProcessingRef.current = true;
       setIsProcessing(true);
       setError(null);
       setParsed(null);
       setResponse(null);
       if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setIsListening(false);
 
       try {
-        // STATE 4 -> 5: use existing service
         const parsedIntent = await parseVoiceIntent(trimmed);
         setParsed(parsedIntent);
         setParsedIntent(parsedIntent);
@@ -177,27 +206,25 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           setResponse(assistantMsg);
           setAssistantResponse(assistantMsg);
           if (onParsedResult && parsedIntent) onParsedResult(parsedIntent, trimmed);
-          // Speak fallback response as well
           setTimeout(() => speak(assistantMsg), 300);
           return;
         }
 
         if (onParsedResult) onParsedResult(parsedIntent, trimmed);
 
-        // STATE 6: use existing Phase 6 implementation
         const assistantMsg = await generateAssistantResponse(parsedIntent, {}, trimmed);
         setResponse(assistantMsg);
         setAssistantResponse(assistantMsg);
-        // SPEAK the AI response aloud – required for "I want 1 kg tomato" flow
         setTimeout(() => speak(assistantMsg), 300);
       } catch (e) {
-        console.error(e);
+        console.error('[VoiceAssistant] processTranscript error:', e);
         setError(
           language === 'hi'
-            ? 'Sorry, main request samajh nahi paaya. Please dobara try karein.'
-            : "Sorry, I couldn't understand that. Please try again."
+            ? 'क्षमा करें, अनुरोध प्रोसेस नहीं हो पाया। कृपया पुनः प्रयास करें।'
+            : "Sorry, I couldn't process that request. Please try again."
         );
       } finally {
+        isProcessingRef.current = false;
         setIsProcessing(false);
       }
     },
@@ -205,6 +232,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   );
 
   const stopListening = useCallback(() => {
+    clearSilenceTimeout();
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -212,8 +240,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     }
     setIsListening(false);
     setInterim('');
-    interimRef.current = '';
-  }, []);
+  }, [clearSilenceTimeout]);
 
   const startListening = useCallback(() => {
     if (!hasSpeechRecognition()) {
@@ -225,21 +252,25 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       return;
     }
 
-    // Stop any ongoing speech before listening
+    if (isProcessingRef.current) return;
+
     stopSpeaking();
+    clearSilenceTimeout();
+    hasProcessedRef.current = false;
     setError(null);
-    // keep transcript until new result, but clear interim/parsed/response for fresh attempt if user re-records
     setInterim('');
     finalTranscriptRef.current = '';
     interimRef.current = '';
+    setTranscript('');
     setParsed(null);
     setResponse(null);
+    setIsSpeaking(false);
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
 
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     recognition.lang = getEffectiveSTTLang();
@@ -247,33 +278,79 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     recognition.onstart = () => {
       setIsListening(true);
       setInterim(language === 'hi' ? 'सुन रहा हूँ...' : 'Listening...');
+      hasProcessedRef.current = false;
     };
 
     recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      let finalTranscript = '';
+      let newInterim = '';
+      let newFinal = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const t = result[0].transcript;
-        if (result.isFinal) finalTranscript += t + ' ';
-        else interimTranscript += t;
+        if (result.isFinal) newFinal += t + ' ';
+        else newInterim += t;
       }
-      if (interimTranscript) {
-        setInterim(interimTranscript);
-        interimRef.current = interimTranscript;
-        finalTranscriptRef.current = '';
+
+      if (newInterim) {
+        newInterim = newInterim.trim();
+        setInterim(newInterim);
+        interimRef.current = newInterim;
+        clearSilenceTimeout();
+        silenceTimeoutRef.current = window.setTimeout(() => {
+          const candidate = finalTranscriptRef.current || interimRef.current;
+          const filtered = candidate && candidate !== 'सुन रहा हूँ...' && candidate !== 'Listening...' ? candidate.trim() : '';
+          if (filtered) {
+            if (hasProcessedRef.current || isProcessingRef.current) return;
+            hasProcessedRef.current = true;
+            try {
+              recognitionRef.current?.stop();
+            } catch {}
+            setIsListening(false);
+            setTranscript(filtered);
+            setInterim('');
+            clearSilenceTimeout();
+            processTranscript(filtered);
+          } else {
+            setIsListening(false);
+            clearSilenceTimeout();
+            try {
+              recognitionRef.current?.stop();
+            } catch {}
+            if (!hasProcessedRef.current) {
+              setError(
+                language === 'hi'
+                  ? 'मैं आपका अनुरोध नहीं सुन पाया। माइक्रोफ़ोन दबाएँ और फिर से प्रयास करें।'
+                  : "I didn't hear a request. Tap the microphone and try again."
+              );
+            }
+          }
+        }, SILENCE_TIMEOUT);
       }
-      if (finalTranscript) {
-        const cleaned = finalTranscript.trim();
-        setTranscript(cleaned);
+
+      if (newFinal) {
+        newFinal = newFinal.trim();
+        const accumulated = finalTranscriptRef.current ? `${finalTranscriptRef.current} ${newFinal}`.trim() : newFinal;
+        finalTranscriptRef.current = accumulated;
+        setTranscript(accumulated);
         setInterim('');
         interimRef.current = '';
-        finalTranscriptRef.current = cleaned;
+        clearSilenceTimeout();
+        silenceTimeoutRef.current = window.setTimeout(() => {
+          if (hasProcessedRef.current || isProcessingRef.current) return;
+          hasProcessedRef.current = true;
+          try {
+            recognitionRef.current?.stop();
+          } catch {}
+          setIsListening(false);
+          processTranscript(accumulated);
+        }, SILENCE_TIMEOUT);
       }
     };
 
     recognition.onerror = (event: any) => {
+      clearSilenceTimeout();
       setIsListening(false);
+      if (hasProcessedRef.current || isProcessingRef.current) return;
       if (event.error === 'not-allowed' || event.error === 'permission-denied') {
         setError(
           language === 'hi'
@@ -283,8 +360,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       } else if (event.error === 'no-speech') {
         setError(
           language === 'hi'
-            ? 'कोई आवाज़ नहीं सुनी गई। कृपया फिर से बोलें।'
-            : 'No speech detected. Please try again.'
+            ? 'मैं आपका अनुरोध नहीं सुन पाया। माइक्रोफ़ोन दबाएँ और फिर से प्रयास करें।'
+            : "I didn't hear a request. Tap the microphone and try again."
         );
       } else if (event.error === 'audio-capture') {
         setError(
@@ -298,25 +375,31 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     };
 
     recognition.onend = () => {
+      clearSilenceTimeout();
       setIsListening(false);
+      setInterim('');
       const candidate = finalTranscriptRef.current || interimRef.current;
       const filtered = candidate && candidate !== 'सुन रहा हूँ...' && candidate !== 'Listening...' ? candidate.trim() : '';
-      if (filtered) {
-        setTranscript(filtered);
-        setInterim('');
-        interimRef.current = '';
-        // STATE 3: transcribed – do NOT auto-process, wait for user to click Process Request (per spec)
-        // keep transcript visible for user to confirm
-      } else {
-        // empty speech
-        if (!transcript) {
-          setError(
-            language === 'hi'
-              ? 'खाली वॉयस — कृपया फिर से बोलें या टाइप करें।'
-              : 'Empty speech. Please try speaking again or type your requirement.'
-          );
+      if (!filtered) {
+        if (!hasProcessedRef.current && !isProcessingRef.current && !transcript && !finalTranscriptRef.current) {
+          // Avoid showing empty error if we already have a result displayed
+          // Only show if truly empty speech and not already processed
+          // Check if we already have parsed/response to avoid overwriting success
+          if (!parsed && !response) {
+            setError(
+              language === 'hi'
+                ? 'मैं आपका अनुरोध नहीं सुन पाया। माइक्रोफ़ोन दबाएँ और फिर से प्रयास करें।'
+                : "I didn't hear a request. Tap the microphone and try again."
+            );
+          }
         }
+        return;
       }
+      if (hasProcessedRef.current || isProcessingRef.current) return;
+      hasProcessedRef.current = true;
+      setTranscript(filtered);
+      interimRef.current = '';
+      processTranscript(filtered);
     };
 
     try {
@@ -325,8 +408,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       console.error(e);
       setError(language === 'hi' ? 'माइक शुरू नहीं हो पाया।' : 'Could not start microphone.');
       setIsListening(false);
+      clearSilenceTimeout();
     }
-  }, [getEffectiveSTTLang, language, transcript]);
+  }, [clearSilenceTimeout, getEffectiveSTTLang, language, parsed, processTranscript, response, stopSpeaking, transcript]);
 
   const handleTypedSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -335,35 +419,24 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       setError(language === 'hi' ? 'कृपया अपनी आवश्यकता टाइप करें।' : 'Please type your requirement.');
       return;
     }
+    if (isProcessingRef.current) return;
+    hasProcessedRef.current = false;
+    clearSilenceTimeout();
     setTranscript(val);
-    setError(null);
-    // keep typed input visible, but transcript is now val
     finalTranscriptRef.current = val;
-  };
-
-  const handleProcessClick = () => {
-    const textToProcess = transcript || typedInput;
-    if (!textToProcess.trim()) {
-      setError(language === 'hi' ? 'पहले बोलें या टाइप करें।' : 'Please speak or type your requirement first.');
-      return;
-    }
-    // ensure transcript holds the typed value if user typed
-    if (!transcript && typedInput) {
-      setTranscript(typedInput.trim());
-      finalTranscriptRef.current = typedInput.trim();
-      processTranscript(typedInput.trim());
-    } else {
-      processTranscript(textToProcess);
-    }
+    interimRef.current = '';
+    setError(null);
+    setInterim('');
+    processTranscript(val);
   };
 
   useEffect(() => {
-    // Preload voices
     if (hasSpeechSynthesis()) {
       window.speechSynthesis.getVoices();
       window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
     }
     return () => {
+      clearSilenceTimeout();
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -371,14 +444,12 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       }
       if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
     };
-  }, []);
+  }, [clearSilenceTimeout]);
 
-  const isIdle = !isListening && !isProcessing && !transcript && !parsed && !response;
-  const isTranscribed = !!transcript && !isProcessing && !parsed;
+  const isIdle = !isListening && !isProcessing && !isSpeaking && !transcript && !parsed && !response;
   const showRequirement = !!parsed && !isProcessing;
   const showResponse = !!response && !isProcessing;
 
-  // Helpers for requirement display
   const formatValue = (val: string | number | null | undefined) => {
     if (val === null || val === undefined || val === '') return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
     return String(val);
@@ -390,7 +461,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   };
   const formatDate = (date: string | null) => {
     if (!date) return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
-    // DEMO_TOMORROW_DATE handling – show Tomorrow/Kal
     if (date === '2026-09-02' || date.toLowerCase().includes('tomorrow')) {
       return language === 'hi' ? 'कल' : 'Tomorrow';
     }
@@ -403,7 +473,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="relative z-10 flex flex-col items-center text-center">
-        {/* STATE 1 – IDLE header */}
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-4">
           <Sparkles size={14} />
           <span>{language === 'hi' ? 'वॉयस अनुरोध' : 'Voice Request'}</span>
@@ -424,7 +493,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
             : 'Tell us what you need in English, Hindi or Hinglish.'}
         </p>
 
-        {/* Microphone – visual focus */}
         <div className="my-8 relative flex flex-col items-center gap-3">
           <div className="relative flex items-center justify-center">
             {(isListening || isProcessing || isSpeaking) && (
@@ -460,8 +528,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                     : 'Understanding your request...'
                   : isSpeaking
                     ? language === 'hi'
-                      ? 'बोल रहा हूँ...'
-                      : 'Speaking...'
+                      ? 'AI is responding...'
+                      : 'AI is responding...'
                     : language === 'hi'
                       ? '🎙️ बोलने के लिए टैप करें'
                       : '🎙️ Tap to Speak'}
@@ -469,11 +537,19 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
             <p className="text-xs text-slate-500 mt-1">
               {isListening
                 ? language === 'hi'
-                  ? 'आप बोल सकते हैं...  •  Stop दबाएँ जब पूरा हो'
-                  : 'You can speak now...  •  Press Stop when done'
-                : language === 'hi'
-                  ? 'माइक दबाएँ और स्वाभाविक रूप से बोलें'
-                  : 'Tap mic and speak naturally'}
+                  ? 'स्वाभाविक रूप से बोलें...'
+                  : 'Speak naturally...'
+                : isProcessing
+                  ? language === 'hi'
+                    ? 'सबसे अच्छा मिलान ढूंढ रहा हूँ...'
+                    : 'Finding the best match...'
+                  : isSpeaking
+                    ? language === 'hi'
+                      ? 'सहायक बोल रहा है...'
+                      : 'AI is speaking...'
+                    : language === 'hi'
+                      ? 'माइक दबाएँ और स्वाभाविक रूप से बोलें'
+                      : 'Tap mic and speak naturally'}
             </p>
           </div>
 
@@ -484,7 +560,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           )}
         </div>
 
-        {/* STATE 1 – Type fallback (always visible in idle, also after error) */}
         <div className="w-full max-w-md">
           <div className="flex items-center gap-3 my-4">
             <div className="h-px flex-1 bg-slate-700/60" />
@@ -516,13 +591,15 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                 />
               </div>
               <Button type="submit" variant="secondary" size="md" disabled={isListening || isProcessing}>
-                {language === 'hi' ? 'सेट करें' : 'Set'}
+                {language === 'hi' ? 'भेजें' : 'Send'}
               </Button>
             </div>
+            <p className="text-[11px] text-slate-500">
+              {language === 'hi' ? 'टाइप करके Enter दबाएँ — तुरंत प्रोसेस होगा' : 'Press Enter to send — auto-processed'}
+            </p>
           </form>
         </div>
 
-        {/* Live listening interim */}
         {isListening && interim && (
           <div className="w-full max-w-lg mt-6 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-left">
             <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">
@@ -532,30 +609,15 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </div>
         )}
 
-        {/* STATE 3 – TRANSCRIBED */}
-        {isTranscribed && (
-          <Card className="w-full max-w-lg mt-6 bg-slate-950/60 border-slate-800 p-4 text-left">
+        {transcript && !isListening && !isProcessing && !isSpeaking && !parsed && !response && !error && (
+          <div className="w-full max-w-lg mt-6 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-left">
             <p className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">
               {language === 'hi' ? 'आपने कहा:' : 'You said:'}
             </p>
             <p className="text-sm font-medium text-white bg-slate-900 border border-slate-800 rounded-xl p-3">“{transcript}”</p>
-            <div className="flex gap-2 mt-3">
-              <Button variant="primary" size="md" onClick={handleProcessClick} disabled={isProcessing}>
-                {language === 'hi' ? 'अनुरोध प्रोसेस करें' : 'Process Request'}
-              </Button>
-              <Button variant="outline" size="md" onClick={handleTryAgain} disabled={isProcessing}>
-                {language === 'hi' ? 'फिर से' : 'Try Again'}
-              </Button>
-            </div>
-            {typedInput && transcript === typedInput && (
-              <p className="text-[11px] text-slate-500 mt-2">
-                {language === 'hi' ? 'टाइप किया गया टेक्स्ट प्रोसेस होगा' : 'Typed text will be processed'}
-              </p>
-            )}
-          </Card>
+          </div>
         )}
 
-        {/* STATE 4 – PROCESSING */}
         {isProcessing && (
           <Card className="w-full max-w-lg mt-6 bg-slate-950/60 border-slate-800 p-4 text-left">
             <div className="flex items-center gap-3">
@@ -565,7 +627,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                   {language === 'hi' ? 'आपके अनुरोध को समझ रहा हूँ...' : 'Understanding your request...'}
                 </p>
                 <p className="text-xs text-slate-500">
-                  {language === 'hi' ? 'कृपया प्रतीक्षा करें' : 'Calling parseVoiceIntent()...'}
+                  {language === 'hi' ? 'सबसे अच्छा मिलान ढूंढ रहा हूँ...' : 'Finding the best match...'}
                 </p>
               </div>
             </div>
@@ -575,7 +637,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </Card>
         )}
 
-        {/* Error handling – friendly, no API keys */}
         {error && !isProcessing && (
           <Card className="w-full max-w-lg mt-4 bg-rose-500/10 border-rose-500/30 p-4 text-left">
             <div className="flex gap-2.5">
@@ -600,7 +661,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </Card>
         )}
 
-        {/* STATE 5 – REQUIREMENT EXTRACTED */}
         {showRequirement && parsed && (
           <Card className="w-full max-w-lg mt-6 bg-slate-900 border-slate-700/80 p-0 overflow-hidden text-left">
             <div className="p-4 border-b border-slate-800">
@@ -656,7 +716,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </Card>
         )}
 
-        {/* STATE 6 – AI RESPONSE */}
         {showResponse && response && (
           <Card className="w-full max-w-lg mt-4 bg-emerald-500/10 border-emerald-500/20 p-4 text-left">
             <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-emerald-400 uppercase mb-2">
@@ -688,7 +747,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </Card>
         )}
 
-        {/* FIND FARMERS / FIND BUYERS – only after valid BUYER/SELLER */}
         {showRequirement && parsed && parsed.intent !== 'UNKNOWN' && onProceed && (
           <div className="w-full max-w-lg mt-4">
             {parsed.intent === 'BUYER' ? (
@@ -712,7 +770,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </div>
         )}
 
-        {/* Unknown intent – still show Try Again */}
         {showRequirement && parsed?.intent === 'UNKNOWN' && (
           <div className="w-full max-w-lg mt-3">
             <Button variant="outline" size="md" onClick={handleTryAgain} className="w-full">
@@ -721,7 +778,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </div>
         )}
 
-        {/* Idle helper – show example when no interaction yet */}
         {isIdle && !error && (
           <p className="text-[11px] text-slate-500 mt-4 max-w-md">
             {language === 'hi'

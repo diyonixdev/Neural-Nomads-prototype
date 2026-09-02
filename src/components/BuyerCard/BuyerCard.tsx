@@ -16,26 +16,26 @@ export const BuyerCard: React.FC<BuyerCardProps> = ({ buyer, onConnect }) => {
   const { language } = useDemo();
 
   return (
-    <Card hover className="flex flex-col justify-between border-slate-700/80 bg-slate-800/90">
+    <Card hover className="flex flex-col justify-between border-slate-200 bg-white shadow-sm">
       <div>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
             <img
               src={buyer.avatar}
               alt={buyer.name}
-              className="w-12 h-12 rounded-full object-cover border-2 border-teal-500/40"
+              className="w-12 h-12 rounded-full object-cover border-2 border-teal-200"
             />
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="font-bold text-slate-100 text-sm sm:text-base">
+                <h3 className="font-bold text-slate-900 text-sm sm:text-base">
                   {language === 'hi' ? buyer.nameHi : buyer.name}
                 </h3>
                 {buyer.verified && (
-                  <ShieldCheck size={16} className="text-teal-400" />
+                  <ShieldCheck size={16} className="text-teal-600" />
                 )}
               </div>
-              <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                <Building size={12} className="text-slate-500" />
+              <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                <Building size={12} className="text-slate-400" />
                 {buyer.type}
               </p>
             </div>
@@ -46,27 +46,27 @@ export const BuyerCard: React.FC<BuyerCardProps> = ({ buyer, onConnect }) => {
         </div>
 
         {/* Demand Info */}
-        <div className="mt-4 p-3.5 bg-slate-900/80 rounded-xl border border-slate-800/80 space-y-2">
+        <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
           <div className="flex justify-between items-center text-xs">
-            <span className="text-slate-400">{language === 'hi' ? 'मांग (फसल)' : 'Required Produce'}:</span>
-            <span className="font-semibold text-slate-100">{buyer.requiredProduce}</span>
+            <span className="text-slate-500">{language === 'hi' ? 'मांग (फसल)' : 'Required Produce'}:</span>
+            <span className="font-semibold text-slate-900">{buyer.requiredProduce}</span>
           </div>
           <div className="flex justify-between items-center text-xs">
-            <span className="text-slate-400">{language === 'hi' ? 'मात्रा' : 'Required Quantity'}:</span>
-            <span className="font-bold text-amber-400">{formatKg(buyer.requiredQuantityKg)}</span>
+            <span className="text-slate-500">{language === 'hi' ? 'मात्रा' : 'Required Quantity'}:</span>
+            <span className="font-bold text-amber-600">{formatKg(buyer.requiredQuantityKg)}</span>
           </div>
           <div className="flex justify-between items-center text-xs">
-            <span className="text-slate-400">{language === 'hi' ? 'बजट दर' : 'Budget Target'}:</span>
-            <span className="font-bold text-emerald-400">{formatCurrency(buyer.budgetPerKg)}/kg</span>
+            <span className="text-slate-500">{language === 'hi' ? 'बजट दर' : 'Budget Target'}:</span>
+            <span className="font-bold text-emerald-600">{formatCurrency(buyer.budgetPerKg)}/kg</span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 pt-1 border-t border-slate-800">
-            <MapPin size={12} className="text-emerald-400 shrink-0" />
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 pt-1 border-t border-slate-200">
+            <MapPin size={12} className="text-emerald-600 shrink-0" />
             <span className="truncate">{buyer.location}</span>
           </div>
         </div>
       </div>
 
-      <div className="mt-5 pt-3 border-t border-slate-800">
+      <div className="mt-5 pt-3 border-t border-slate-200">
         <Button
           variant="primary"
           className="w-full"

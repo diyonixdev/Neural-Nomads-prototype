@@ -1,15 +1,19 @@
 const fs = require('fs');
 const path = require('path');
 try {
-  const cmdPath = path.join(process.cwd(), 'powershell.cmd');
-  if (fs.existsSync(cmdPath)) {
-    fs.unlinkSync(cmdPath);
-    console.log('Deleted powershell.cmd');
-  }
-  const batPath = path.join(process.cwd(), 'powershell.bat');
-  if (fs.existsSync(batPath)) fs.unlinkSync(batPath);
-  const comPath = path.join(process.cwd(), 'powershell.com');
-  if (fs.existsSync(comPath)) fs.unlinkSync(comPath);
-} catch (e) {
-  console.error(e);
-}
+  const files = [
+    path.join(process.cwd(), 'test_hello.js'),
+    path.join(process.cwd(), 'error_test.js'),
+    path.join(process.cwd(), 'src', 'test_log.js')
+  ];
+  files.forEach(f => {
+    try {
+      if (fs.existsSync(f)) {
+        fs.unlinkSync(f);
+        console.log(`Deleted ${f}`);
+      } else {
+        console.log(`Not found ${f}`);
+      }
+    } catch(e) { console.error(e); }
+  });
+} catch(e) { console.error(e); }

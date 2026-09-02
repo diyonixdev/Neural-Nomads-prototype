@@ -359,26 +359,70 @@ const parseVoiceIntentFallback = (text: string): ParsedVoiceIntent => {
   };
 };
 
+const withFetchTimeout = async <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = globalThis.setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms) as unknown as number;
+  });
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    return result as T;
+  } finally {
+    if (timeoutId) globalThis.clearTimeout(timeoutId);
+  }
+};
+
 export const parseVoiceIntent = async (text: string): Promise<ParsedVoiceIntent> => {
+  console.log('[FRONTEND] request started for:', text);
+  console.log('[FRONTEND] calling /api/voice-intent with:', text);
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), 8000);
+  const timeoutId = globalThis.setTimeout(() => {
+    console.error('[FRONTEND] voice-intent abort after 20000ms');
+    controller.abort();
+  }, 20000);
 
   try {
-    const response = await fetch(VOICE_INTENT_API_ENDPOINT, {
+    const fetchPromise = fetch(VOICE_INTENT_API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
       signal: controller.signal,
     });
 
-    if (!response.ok) return parseVoiceIntentFallback(text);
+    const response = await withFetchTimeout(fetchPromise, 20000, 'voice-intent');
+    console.log('[FRONTEND] voice-intent response received:', response.status);
 
-    const payload: unknown = await response.json();
+    if (!response.ok) {
+      // If backend returns 502/504/503, fallback to local parsing but log for debugging
+      console.warn(`[aiService] /api/voice-intent ${response.status}, falling back to local parsing`);
+      const fallback = parseVoiceIntentFallback(text);
+      console.log('[FRONTEND] voice-intent fallback parsed:', fallback);
+      return fallback;
+    }
+
+    const payload: unknown = await withFetchTimeout(response.json() as Promise<unknown>, 2000, 'voice-intent json');
+    console.log('[FRONTEND] voice-intent payload:', payload);
     const parsed = validateAiVoiceIntent(payload);
 
-    return parsed ?? parseVoiceIntentFallback(text);
-  } catch {
-    return parseVoiceIntentFallback(text);
+    if (!parsed) {
+      console.warn('[aiService] Invalid AI intent JSON, using fallback', payload);
+      const fallback = parseVoiceIntentFallback(text);
+      console.log('[FRONTEND] voice-intent fallback (invalid JSON):', fallback);
+      return fallback;
+    }
+    console.log('[FRONTEND] voice-intent parsed successfully:', parsed);
+    return parsed;
+  } catch (e: any) {
+    if (e?.name === 'AbortError' || e?.message?.includes('timeout')) {
+      console.warn('[aiService] voice-intent timeout after 20s, using fallback');
+      console.log('[FRONTEND] voice-intent timeout fallback for:', text);
+    } else {
+      console.warn('[aiService] voice-intent fetch failed, using fallback', e?.message);
+      console.log('[FRONTEND] voice-intent fetch error fallback:', e?.message);
+    }
+    const fallback = parseVoiceIntentFallback(text);
+    console.log('[FRONTEND] voice-intent fallback (catch):', fallback);
+    return fallback;
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
@@ -456,27 +500,60 @@ export const generateAssistantResponse = async (
   context: AssistantContext,
   originalText?: string,
 ): Promise<string> => {
+  console.log('[FRONTEND] calling /api/assistant-response with:', requirement, context);
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), 8000);
+  const timeoutId = globalThis.setTimeout(() => {
+    console.error('[FRONTEND] assistant-response abort after 20000ms');
+    controller.abort();
+  }, 20000);
 
   try {
-    const response = await fetch(ASSISTANT_RESPONSE_API_ENDPOINT, {
+    const fetchPromise = fetch(ASSISTANT_RESPONSE_API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requirement, context, originalText }),
       signal: controller.signal,
     });
 
-    if (!response.ok) return assistantResponseFallback(requirement, context, originalText);
+    const response = await withFetchTimeout(fetchPromise, 20000, 'assistant-response');
+    console.log('[FRONTEND] assistant-response status:', response.status);
 
-    const payload: unknown = await response.json();
-    if (payload && typeof payload === 'object' && 'response' in payload && typeof (payload as { response: unknown }).response === 'string') {
-      return (payload as { response: string }).response;
+    if (!response.ok) {
+      console.warn(`[aiService] /api/assistant-response ${response.status}, using fallback`);
+      const fallback = assistantResponseFallback(requirement, context, originalText);
+      console.log('[FRONTEND] assistant-response fallback (non-ok):', fallback);
+      return fallback;
     }
 
-    return assistantResponseFallback(requirement, context, originalText);
-  } catch {
-    return assistantResponseFallback(requirement, context, originalText);
+    const payload: unknown = await withFetchTimeout(response.json() as Promise<unknown>, 2000, 'assistant-response json');
+    console.log('[FRONTEND] assistant-response payload:', payload);
+    if (payload && typeof payload === 'object' && 'response' in payload && typeof (payload as { response: unknown }).response === 'string') {
+      const text = (payload as { response: string }).response.trim();
+      if (!text) {
+        console.warn('[aiService] Empty AI response, using fallback');
+        const fallback = assistantResponseFallback(requirement, context, originalText);
+        console.log('[FRONTEND] final response received (empty fallback):', fallback);
+        return fallback;
+      }
+      console.log('[FRONTEND] final response received:', text);
+      return text;
+    }
+
+    console.warn('[aiService] Invalid assistant response, using fallback', payload);
+    const fallback = assistantResponseFallback(requirement, context, originalText);
+    console.log('[FRONTEND] final response fallback (invalid):', fallback);
+    return fallback;
+  } catch (e: any) {
+    if (e?.name === 'AbortError' || e?.message?.includes('timeout')) {
+      console.warn('[aiService] assistant-response timeout after 20s, using fallback');
+      console.log('[FRONTEND] assistant-response timeout fallback');
+    } else {
+      console.warn('[aiService] assistant-response failed, using fallback', e?.message);
+      console.log('[FRONTEND] assistant-response error fallback:', e?.message);
+    }
+    const fallback = assistantResponseFallback(requirement, context, originalText);
+    console.log('[FRONTEND] final response fallback (catch):', fallback);
+    return fallback;
   } finally {
     globalThis.clearTimeout(timeoutId);
   }

@@ -23,18 +23,18 @@ export const ConsumerLogisticsPage: React.FC = () => {
         <div>
           <button
             onClick={() => navigate('/consumer/storage')}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
           >
             <ArrowLeft size={14} />
             <span>Back to Storage</span>
           </button>
-          <h1 className="text-2xl font-black text-white flex items-center gap-2">
+          <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
             <span>{language === 'hi' ? 'ग्रीन ईवी लॉजिस्टिक्स और रूट' : 'EV Cold-Chain Logistics'}</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1">
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-200 text-emerald-600 font-semibold flex items-center gap-1">
               <Zap size={12} /> Zero Emissions Fleet
             </span>
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-500 text-sm mt-1">
             Reefer EV mini-trucks routed directly from farm pre-cooling to buyer doorstep.
           </p>
         </div>
@@ -55,7 +55,7 @@ export const ConsumerLogisticsPage: React.FC = () => {
 
       {/* Available Vehicles Grid */}
       <div className="space-y-3">
-        <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+        <h3 className="text-sm font-bold text-slate-600 uppercase tracking-wider">
           Available EV Fleet Pilots Nearby:
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -72,3 +72,6 @@ export const ConsumerLogisticsPage: React.FC = () => {
     </div>
   );
 };
+
+
+

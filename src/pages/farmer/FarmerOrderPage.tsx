@@ -18,16 +18,16 @@ export const FarmerOrderPage: React.FC = () => {
         <div>
           <button
             onClick={() => navigate('/farmer/buyers')}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
           >
             <ArrowLeft size={14} />
             <span>Back to Buyers</span>
           </button>
-          <h1 className="text-2xl font-black text-white">
+          <h1 className="text-2xl font-black text-slate-900">
             {language === 'hi' ? 'किसान ऑर्डर व त्वरित भुगतान' : 'Farmer Order Dispatch & Settlement'}
           </h1>
-          <p className="text-slate-400 text-sm">
-            Contract: <span className="font-mono text-teal-400">{activeOrder.id}</span>
+          <p className="text-slate-500 text-sm">
+            Contract: <span className="font-mono text-teal-600">{activeOrder.id}</span>
           </p>
         </div>
         <Badge variant="emerald" icon={<ShieldCheck size={14} />}>
@@ -36,14 +36,14 @@ export const FarmerOrderPage: React.FC = () => {
       </div>
 
       {/* Payout & Earnings Summary */}
-      <Card className="border-teal-500/40 bg-slate-900/90 p-6 space-y-6">
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+      <Card className="border-teal-500/40 bg-white p-6 space-y-6">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-200">
           <div>
-            <span className="text-xs text-slate-400 font-semibold uppercase">Total Guaranteed Payout</span>
-            <div className="text-3xl font-black text-emerald-400 mt-1">
+            <span className="text-xs text-slate-500 font-semibold uppercase">Total Guaranteed Payout</span>
+            <div className="text-3xl font-black text-emerald-600 mt-1">
               {formatCurrency(activeOrder.totalAmount)}
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 mt-0.5">
               500 kg @ {formatCurrency(activeOrder.agreedPricePerKg)}/kg (vs Mandi {formatCurrency(19)}/kg)
             </p>
           </div>
@@ -52,7 +52,7 @@ export const FarmerOrderPage: React.FC = () => {
             <Badge variant="emerald" size="md">
               +{activeOrder.impact.farmerEarningsIncreasePct}% Gain
             </Badge>
-            <p className="text-xs text-slate-400 mt-2">Direct Bank Transfer on Delivery</p>
+            <p className="text-xs text-slate-500 mt-2">Direct Bank Transfer on Delivery</p>
           </div>
         </div>
 
@@ -83,3 +83,5 @@ export const FarmerOrderPage: React.FC = () => {
     </div>
   );
 };
+
+

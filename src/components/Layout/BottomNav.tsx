@@ -31,7 +31,7 @@ export const BottomNav: React.FC = () => {
   const currentLinks = role === 'consumer' ? consumerLinks : farmerLinks;
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-3 py-2">
+    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200 px-3 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
       <div className="flex items-center justify-around">
         {currentLinks.map((link) => {
           const Icon = link.icon;
@@ -45,8 +45,8 @@ export const BottomNav: React.FC = () => {
                   link.special
                     ? '-mt-5 bg-emerald-500 text-white p-3 rounded-full shadow-lg shadow-emerald-500/30'
                     : isActive
-                    ? 'text-emerald-400 font-semibold'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'text-emerald-600 font-semibold'
+                    : 'text-slate-500 hover:text-slate-700'
                 }`
               }
             >

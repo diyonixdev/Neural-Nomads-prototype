@@ -31,18 +31,18 @@ export const FarmerBuyersPage: React.FC = () => {
         <div>
           <button
             onClick={() => navigate('/farmer/voice')}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
           >
             <ArrowLeft size={14} />
             <span>{language === 'hi' ? 'वॉयस पर वापस जाएं' : 'Back to Farmer Voice'}</span>
           </button>
-          <h1 className="text-2xl font-black text-white flex items-center gap-2">
+          <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
             <span>{language === 'hi' ? 'सत्यापित खरीदार मिलान' : 'Matched Verified Buyers'}</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-400 font-semibold">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-200 text-teal-600 font-semibold">
               {displayBuyers.length} {language === 'hi' ? 'सक्रिय मांग' : 'Active Buyer Demands'}
             </span>
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-500 text-sm mt-1">
             {quantityLabel
               ? (language === 'hi'
                   ? `${quantityLabel} ${productLabel} के लिए मिलान किए गए खरीदार।`
@@ -58,8 +58,8 @@ export const FarmerBuyersPage: React.FC = () => {
       {assistantResponse && (
         <div className="bg-teal-500/10 border border-teal-500/20 rounded-2xl p-4">
           <div className="flex items-start gap-3">
-            <Volume2 size={18} className="text-teal-400 mt-0.5 shrink-0" />
-            <p className="text-sm text-slate-200 leading-relaxed">{assistantResponse}</p>
+            <Volume2 size={18} className="text-teal-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-slate-800 leading-relaxed">{assistantResponse}</p>
           </div>
         </div>
       )}
@@ -76,3 +76,6 @@ export const FarmerBuyersPage: React.FC = () => {
     </div>
   );
 };
+
+
+

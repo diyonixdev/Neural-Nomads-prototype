@@ -22,18 +22,18 @@ export const ConsumerStoragePage: React.FC = () => {
         <div>
           <button
             onClick={() => navigate('/consumer/order')}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
           >
             <ArrowLeft size={14} />
             <span>Back to Order Summary</span>
           </button>
-          <h1 className="text-2xl font-black text-white flex items-center gap-2">
+          <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
             <span>{language === 'hi' ? 'सोलर कोल्ड स्टोरेज आवंटन' : 'Cold Storage & Buffer Allocation'}</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-semibold">
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-200 text-cyan-600 font-semibold">
               IoT Telemetry Active
             </span>
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-500 text-sm mt-1">
             Prevent spoilage and maintain farm freshness with solar micro-cooling hubs close to the harvest location.
           </p>
         </div>
@@ -60,3 +60,6 @@ export const ConsumerStoragePage: React.FC = () => {
     </div>
   );
 };
+
+
+

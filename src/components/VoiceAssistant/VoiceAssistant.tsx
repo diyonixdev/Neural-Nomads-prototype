@@ -4,17 +4,19 @@ import {
   MicOff,
   Loader2,
   Sparkles,
-  ArrowRight,
-  Keyboard,
   Square,
   AlertCircle,
   Volume2,
+  Search,
+  Brain,
+  Store,
+  CheckCircle2,
+  Keyboard,
 } from 'lucide-react';
 import { useDemo } from '../../context/DemoContext';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
-import { parseVoiceIntent, generateAssistantResponse } from '../../services/aiService';
 import type { ParsedVoiceIntent } from '../../services/aiService';
 
 interface VoiceAssistantProps {
@@ -23,7 +25,7 @@ interface VoiceAssistantProps {
   onProceed?: () => void;
 }
 
-type RecognitionLang = 'auto' | 'en-IN' | 'hi-IN';
+type AssistantPhase = 'idle' | 'listening' | 'understanding' | 'searching' | 'responding' | 'speaking' | 'error';
 
 declare global {
   interface Window {
@@ -31,8 +33,6 @@ declare global {
     webkitSpeechRecognition: any;
   }
 }
-
-const SILENCE_TIMEOUT = 1500;
 
 const hasSpeechRecognition = () =>
   typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -65,31 +65,29 @@ const getPreferredVoice = (lang: 'hi' | 'en'): SpeechSynthesisVoice | null => {
 
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedResult, onProceed }) => {
   const { language, setParsedIntent, setAssistantResponse, setLastSpokenText } = useDemo();
+  // Keep onProceed for backward compat (parent pages still pass it), but new flow is auto — no extra click needed
+  void onProceed;
 
-  const [isListening, setIsListening] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [phase, setPhase] = useState<AssistantPhase>('idle');
   const [transcript, setTranscript] = useState('');
   const [interim, setInterim] = useState('');
   const [typedInput, setTypedInput] = useState('');
   const [parsed, setParsed] = useState<ParsedVoiceIntent | null>(null);
   const [response, setResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [recognitionLang] = useState<RecognitionLang>('auto');
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [ttsEnabled] = useState(true);
+  const [resultSummary, setResultSummary] = useState<string | null>(null);
 
   const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef<string>('');
   const interimRef = useRef<string>('');
   const silenceTimeoutRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
-  const hasProcessedRef = useRef(false);
 
   const getEffectiveSTTLang = useCallback((): string => {
-    if (recognitionLang === 'hi-IN') return 'hi-IN';
-    if (recognitionLang === 'en-IN') return 'en-IN';
     return language === 'hi' ? 'hi-IN' : 'en-IN';
-  }, [recognitionLang, language]);
+  }, [language]);
 
   const clearSilenceTimeout = useCallback(() => {
     if (silenceTimeoutRef.current !== null) {
@@ -107,10 +105,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
 
   const speak = useCallback(
     (text: string) => {
-      if (!ttsEnabled || !hasSpeechSynthesis() || !text) return;
+      if (!hasSpeechSynthesis() || !text) return;
       try {
         window.speechSynthesis.cancel();
-        setIsListening(false);
         const utter = new SpeechSynthesisUtterance(text);
         const langHint = detectResponseLanguage(text);
         utter.lang = langHint === 'hi' ? 'hi-IN' : 'en-IN';
@@ -121,10 +118,16 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         if (voice) utter.voice = voice;
         utter.onstart = () => {
           setIsSpeaking(true);
-          setIsListening(false);
+          setPhase('speaking');
         };
-        utter.onend = () => setIsSpeaking(false);
-        utter.onerror = () => setIsSpeaking(false);
+        utter.onend = () => {
+          setIsSpeaking(false);
+          setPhase('idle');
+        };
+        utter.onerror = () => {
+          setIsSpeaking(false);
+          setPhase('idle');
+        };
         if (window.speechSynthesis.getVoices().length === 0) {
           window.speechSynthesis.onvoiceschanged = () => {
             try {
@@ -142,15 +145,14 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       } catch (e) {
         console.warn('TTS failed', e);
         setIsSpeaking(false);
+        setPhase('idle');
       }
     },
-    [ttsEnabled]
+    []
   );
 
-  const resetAll = useCallback(() => {
+  const resetForNext = useCallback(() => {
     clearSilenceTimeout();
-    hasProcessedRef.current = false;
-    isProcessingRef.current = false;
     if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
     setTranscript('');
     setInterim('');
@@ -159,76 +161,249 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     setParsed(null);
     setResponse(null);
     setError(null);
-    setIsProcessing(false);
-    setIsListening(false);
+    setErrorCode(null);
+    setResultSummary(null);
+    setPhase('idle');
     setIsSpeaking(false);
+    isProcessingRef.current = false;
   }, [clearSilenceTimeout]);
 
-  const handleTryAgain = () => {
-    resetAll();
-    setTypedInput('');
-  };
+  const handleError = useCallback((code: string, message: string) => {
+    setError(message);
+    setErrorCode(code);
+    setPhase('error');
+    isProcessingRef.current = false;
+  }, []);
 
   const processTranscript = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) {
-        setError(
+        handleError(
+          'no-speech',
           language === 'hi'
-            ? 'कृपया पहले बोलें या टाइप करें।'
-            : "I didn't hear a request. Tap the microphone and try again."
+            ? 'मैंने कुछ नहीं सुना। कृपया फिर से बोलें या टाइप करें।'
+            : "I didn't catch that. Please speak again or type."
         );
         return;
       }
 
-      if (isProcessingRef.current) return;
+      if (isProcessingRef.current) {
+        console.log('[FRONTEND] request already in progress, ignoring duplicate:', trimmed);
+        return;
+      }
       isProcessingRef.current = true;
-      setIsProcessing(true);
+      console.log('[FRONTEND] request started with text:', trimmed);
+      console.log('[FRONTEND] calling /api/voice-intent');
       setError(null);
+      setErrorCode(null);
       setParsed(null);
       setResponse(null);
+      setResultSummary(null);
       if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
       setIsSpeaking(false);
-      setIsListening(false);
+      setTranscript(trimmed);
+      setInterim('');
+
+      const roleHint = mode === 'farmer' ? 'farmer' : 'buyer';
 
       try {
-        const parsedIntent = await parseVoiceIntent(trimmed);
-        setParsed(parsedIntent);
-        setParsedIntent(parsedIntent);
-        setLastSpokenText(trimmed);
+        // Phase 1: Understanding — parse intent via backend (/api/voice-intent)
+        setPhase('understanding');
+        // We use the unified assistantService which does: parse -> search -> response
+        // But to show granular phases without faking, we split the steps:
+        // First, call processUserMessage which internally does all three, but we want to show Searching separately.
+        // So we will show Understanding while calling processUserMessage, then Searching is part of it.
+        // Instead, we show Understanding first, then Searching when the backend search happens.
+        // Since processUserMessage is a single call that does all, we simulate phases based on actual sub-steps:
+        // We'll show Understanding immediately, then after 300ms if still processing, show Searching, then Responding.
+        // But spec says do NOT fake with arbitrary delays, so we need to tie phases to actual promises.
+        // To avoid faking, we will call the backend steps separately and update phase accordingly.
 
-        if (!parsedIntent || parsedIntent.intent === 'UNKNOWN') {
+        // Import helpers dynamically to avoid circular
+        const { parseVoiceIntent, generateAssistantResponse } = await import('../../services/aiService');
+        const { farmerInventoryService } = await import('../../services/farmerInventoryService');
+
+        // Understanding phase is parseVoiceIntent
+        let parsedIntent: ParsedVoiceIntent;
+        try {
+          parsedIntent = await parseVoiceIntent(trimmed);
+          console.log('[FRONTEND] voice-intent response received:', parsedIntent);
+        } catch (e: any) {
+          console.error('[FRONTEND] voice-intent error:', e);
+          if (e?.name === 'AbortError' || e?.message?.includes('timeout')) {
+            handleError('timeout', language === 'hi' ? 'AI ने समय पर जवाब नहीं दिया। कृपया फिर से कोशिश करें।' : 'AI timed out. Please try again.');
+            return;
+          }
+          throw e;
+        }
+
+        if (!parsedIntent || parsedIntent.product === null) {
+          // Still proceed to generate response for UNKNOWN, but show Understanding -> Responding
+          setParsed(parsedIntent);
+          setParsedIntent(parsedIntent);
+          setLastSpokenText(trimmed);
+          if (onParsedResult && parsedIntent) onParsedResult(parsedIntent, trimmed);
+
+          setPhase('responding');
           const assistantMsg = await generateAssistantResponse(
             parsedIntent ?? { intent: 'UNKNOWN', product: null, quantity: null, unit: null, quality: null, location: null, date: null, price: null },
             {},
             trimmed
           );
+          if (!assistantMsg || !assistantMsg.trim()) {
+            handleError('empty-response', language === 'hi' ? 'AI ने खाली जवाब दिया। कृपया फिर से कोशिश करें।' : 'AI returned empty response. Please try again.');
+            return;
+          }
           setResponse(assistantMsg);
           setAssistantResponse(assistantMsg);
-          if (onParsedResult && parsedIntent) onParsedResult(parsedIntent, trimmed);
-          setTimeout(() => speak(assistantMsg), 300);
+          setPhase('speaking');
+          speak(assistantMsg);
           return;
         }
 
+        setParsed(parsedIntent);
+        setParsedIntent(parsedIntent);
+        setLastSpokenText(trimmed);
         if (onParsedResult) onParsedResult(parsedIntent, trimmed);
 
-        const assistantMsg = await generateAssistantResponse(parsedIntent, {}, trimmed);
+        // Phase 2: Searching FarmDirect — real marketplace/database via backend
+        console.log('[FRONTEND] starting marketplace search with intent:', parsedIntent);
+        setPhase('searching');
+
+        // Determine role and action
+        const lower = trimmed.toLowerCase();
+        const isAddIntent = /(\badd\b|\bhave\b|\bhain\b|\bpaas\b.*\bhai\b|\bbechna\b)/i.test(trimmed) && !!parsedIntent.product && !!parsedIntent.quantity;
+        const isInventoryQuery = /show.*inventory|my inventory|my produce|stock/i.test(lower);
+        const isBuyerQuery = /show.*buyers|buyers.*looking|who.*interested|khareedar/i.test(lower);
+
+        let searchResults: any = null;
+        let addedProduce: any = null;
+        let buyerDemand: any = null;
+        let inventory: any = null;
+
+        try {
+          if ((parsedIntent.intent === 'SELLER' || mode === 'farmer') && isAddIntent) {
+            // Seller add — goes through backend API (farmerInventoryService)
+            const catMap: Record<string, string> = {
+              Tomato: 'vegetables', Potato: 'vegetables', Onion: 'vegetables', Wheat: 'grains', Rice: 'grains', Cauliflower: 'vegetables', Cabbage: 'vegetables', Carrot: 'vegetables', Peas: 'vegetables', Apple: 'fruits', Banana: 'fruits', Mango: 'fruits',
+            };
+            const category = (catMap[parsedIntent.product!] || 'vegetables') as any;
+            const produce = await farmerInventoryService.addProduce({
+              produceName: parsedIntent.product!,
+              category,
+              quantity: parsedIntent.quantity!,
+              unit: (parsedIntent.unit as any) || 'kg',
+              grade: (parsedIntent.quality as any) || 'Grade A',
+              expectedPrice: parsedIntent.price || 25,
+              location: parsedIntent.location || 'Dasna, Ghaziabad',
+              state: 'Uttar Pradesh',
+              harvestDate: new Date().toISOString().slice(0, 10),
+              farmerId: 'f-001',
+            });
+            addedProduce = produce;
+            setResultSummary(
+              language === 'hi'
+                ? `✅ ${produce.name} जोड़ा गया — ${produce.quantityKg} kg`
+                : `✅ Added ${produce.name} — ${produce.quantityKg} kg`
+            );
+          } else if ((parsedIntent.intent === 'SELLER' || mode === 'farmer') && isInventoryQuery) {
+            const res = await fetch('/api/produce?farmerId=f-001');
+            if (!res.ok) throw new Error(`inventory fetch ${res.status}`);
+            const list = await res.json();
+            inventory = list;
+            setResultSummary(language === 'hi' ? `📦 ${list.length} लॉट इन्वेंटरी में` : `📦 ${list.length} lots in inventory`);
+          } else if ((parsedIntent.intent === 'SELLER' || mode === 'farmer') && isBuyerQuery) {
+            const url = parsedIntent.product ? `/api/buyer-requirements?product=${encodeURIComponent(parsedIntent.product)}` : '/api/buyer-requirements';
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`buyer fetch ${res.status}`);
+            const list = await res.json();
+            buyerDemand = list;
+            setResultSummary(language === 'hi' ? `👥 ${list.length} खरीदार मिले` : `👥 ${list.length} buyers found`);
+          } else {
+            // Buyer search — via backend marketplace
+            console.log('[FRONTEND] starting marketplace search');
+            const res = await fetch('/api/marketplace/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parsedIntent, role: mode === 'farmer' ? 'farmer' : 'buyer', text: trimmed, filters: {} }),
+            });
+            console.log('[FRONTEND] marketplace search status:', res.status);
+            if (!res.ok) {
+              if (res.status === 0 || res.status >= 500) throw new Error('backend unavailable');
+              throw new Error(`search ${res.status}`);
+            }
+            const data = await res.json();
+            console.log('[FRONTEND] marketplace search results:', data);
+            searchResults = data.results || [];
+            setResultSummary(
+              language === 'hi'
+                ? `🔍 ${data.total} परिणाम मिले`
+                : `🔍 ${data.total} results found`
+            );
+          }
+        } catch (e: any) {
+          // Searching failed — will still try to generate response with fallback context
+          console.warn('Searching FarmDirect failed, fallback to local', e);
+          if (e?.message?.includes('Failed to fetch') || e?.message?.includes('backend')) {
+            handleError('network', language === 'hi' ? 'नेटवर्क त्रुटि। कृपया कनेक्शन जांचें।' : 'Network error. Please check connection.');
+            return;
+          }
+          // For other searching errors, continue to responding with fallback
+          setResultSummary(null);
+        }
+
+        // Phase 3: Responding — generate AI response via backend
+        console.log('[FRONTEND] calling /api/assistant-response');
+        setPhase('responding');
+        let context: any = {};
+        if (searchResults) {
+          context.farmersFound = searchResults.length;
+          context.farmerNames = searchResults.slice(0, 3).map((r: any) => r.farmer?.name || r.name);
+        } else if (buyerDemand) {
+          context.buyersFound = buyerDemand.length;
+          context.buyerNames = buyerDemand.slice(0, 3).map((r: any) => r.buyerName || r.buyerId);
+        } else if (inventory) {
+          context.inventoryCount = inventory.length;
+        } else if (addedProduce) {
+          context.added = addedProduce.name;
+        }
+
+        let assistantMsg: string;
+        try {
+          assistantMsg = await generateAssistantResponse(parsedIntent, context, trimmed);
+          console.log('[FRONTEND] final response received:', assistantMsg);
+        } catch (e: any) {
+          if (e?.name === 'AbortError' || e?.message?.includes('timeout')) {
+            handleError('timeout', language === 'hi' ? 'AI ने समय पर जवाब नहीं दिया।' : 'AI timed out.');
+            return;
+          }
+          throw e;
+        }
+
+        if (!assistantMsg || !assistantMsg.trim()) {
+          handleError('empty-response', language === 'hi' ? 'AI ने खाली जवाब दिया।' : 'AI returned empty response.');
+          return;
+        }
+
         setResponse(assistantMsg);
         setAssistantResponse(assistantMsg);
-        setTimeout(() => speak(assistantMsg), 300);
-      } catch (e) {
-        console.error('[VoiceAssistant] processTranscript error:', e);
-        setError(
-          language === 'hi'
-            ? 'क्षमा करें, अनुरोध प्रोसेस नहीं हो पाया। कृपया पुनः प्रयास करें।'
-            : "Sorry, I couldn't process that request. Please try again."
-        );
+        setPhase('speaking');
+        speak(assistantMsg);
+      } catch (e: any) {
+        console.error('[VoiceAssistant] process error:', e);
+        if (e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError')) {
+          handleError('network', language === 'hi' ? 'नेटवर्क या बैकएंड उपलब्ध नहीं।' : 'Network or backend unavailable. Please try again.');
+        } else if (e?.name === 'AbortError') {
+          handleError('timeout', language === 'hi' ? 'समय समाप्त।' : 'Request timed out.');
+        } else {
+          handleError('backend', language === 'hi' ? 'प्रोसेसिंग में त्रुटि।' : 'Processing error. Please try again.');
+        }
       } finally {
         isProcessingRef.current = false;
-        setIsProcessing(false);
       }
     },
-    [language, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak]
+    [language, mode, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak, handleError]
   );
 
   const stopListening = useCallback(() => {
@@ -238,16 +413,17 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         recognitionRef.current.stop();
       } catch {}
     }
-    setIsListening(false);
+    setPhase((prev) => (prev === 'listening' ? 'idle' : prev));
     setInterim('');
   }, [clearSilenceTimeout]);
 
   const startListening = useCallback(() => {
     if (!hasSpeechRecognition()) {
-      setError(
+      handleError(
+        'no-voice',
         language === 'hi'
-          ? 'आपके ब्राउज़र में वॉयस सपोर्ट नहीं है। कृपया Chrome/Edge उपयोग करें या नीचे टाइप करें।'
-          : 'Voice recognition not supported in this browser. Please use Chrome/Edge or type your requirement below.'
+          ? 'आपके ब्राउज़र में वॉयस सपोर्ट नहीं है। Chrome/Edge उपयोग करें या टाइप करें।'
+          : 'Voice not supported in this browser. Please use Chrome/Edge or type.'
       );
       return;
     }
@@ -256,15 +432,17 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
 
     stopSpeaking();
     clearSilenceTimeout();
-    hasProcessedRef.current = false;
     setError(null);
+    setErrorCode(null);
     setInterim('');
     finalTranscriptRef.current = '';
     interimRef.current = '';
     setTranscript('');
     setParsed(null);
     setResponse(null);
+    setResultSummary(null);
     setIsSpeaking(false);
+    setPhase('listening');
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
@@ -276,9 +454,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     recognition.lang = getEffectiveSTTLang();
 
     recognition.onstart = () => {
-      setIsListening(true);
+      setPhase('listening');
       setInterim(language === 'hi' ? 'सुन रहा हूँ...' : 'Listening...');
-      hasProcessedRef.current = false;
     };
 
     recognition.onresult = (event: any) => {
@@ -300,31 +477,24 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           const candidate = finalTranscriptRef.current || interimRef.current;
           const filtered = candidate && candidate !== 'सुन रहा हूँ...' && candidate !== 'Listening...' ? candidate.trim() : '';
           if (filtered) {
-            if (hasProcessedRef.current || isProcessingRef.current) return;
-            hasProcessedRef.current = true;
+            if (isProcessingRef.current) return;
             try {
               recognitionRef.current?.stop();
             } catch {}
-            setIsListening(false);
             setTranscript(filtered);
             setInterim('');
             clearSilenceTimeout();
+            console.log('[FRONTEND] interim silence timeout, processing:', filtered);
             processTranscript(filtered);
           } else {
-            setIsListening(false);
+            setPhase('idle');
             clearSilenceTimeout();
             try {
               recognitionRef.current?.stop();
             } catch {}
-            if (!hasProcessedRef.current) {
-              setError(
-                language === 'hi'
-                  ? 'मैं आपका अनुरोध नहीं सुन पाया। माइक्रोफ़ोन दबाएँ और फिर से प्रयास करें।'
-                  : "I didn't hear a request. Tap the microphone and try again."
-              );
-            }
+            handleError('no-speech', language === 'hi' ? 'मैंने कुछ नहीं सुना। फिर से बोलें।' : "I didn't catch that. Please speak again.");
           }
-        }, SILENCE_TIMEOUT);
+        }, 1200);
       }
 
       if (newFinal) {
@@ -336,69 +506,56 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         interimRef.current = '';
         clearSilenceTimeout();
         silenceTimeoutRef.current = window.setTimeout(() => {
-          if (hasProcessedRef.current || isProcessingRef.current) return;
-          hasProcessedRef.current = true;
+          if (isProcessingRef.current) return;
           try {
             recognitionRef.current?.stop();
           } catch {}
-          setIsListening(false);
+          console.log('[FRONTEND] final result silence timeout, processing:', accumulated);
           processTranscript(accumulated);
-        }, SILENCE_TIMEOUT);
+        }, 900);
       }
     };
 
     recognition.onerror = (event: any) => {
       clearSilenceTimeout();
-      setIsListening(false);
-      if (hasProcessedRef.current || isProcessingRef.current) return;
+      if (isProcessingRef.current) return;
       if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-        setError(
+        handleError(
+          'permission-denied',
           language === 'hi'
             ? 'माइक्रोफ़ोन की अनुमति नहीं दी गई। ब्राउज़र सेटिंग्स में अनुमति दें।'
-            : 'Microphone permission denied. Please allow access in browser settings and try again.'
+            : 'Microphone permission denied. Please allow access in browser settings.'
         );
       } else if (event.error === 'no-speech') {
-        setError(
-          language === 'hi'
-            ? 'मैं आपका अनुरोध नहीं सुन पाया। माइक्रोफ़ोन दबाएँ और फिर से प्रयास करें।'
-            : "I didn't hear a request. Tap the microphone and try again."
-        );
+        handleError('no-speech', language === 'hi' ? 'मैंने कुछ नहीं सुना। फिर से बोलें।' : "I didn't catch that. Please speak again.");
       } else if (event.error === 'audio-capture') {
-        setError(
-          language === 'hi'
-            ? 'माइक्रोफ़ोन नहीं मिला। कृपया माइक कनेक्ट करें।'
-            : 'No microphone found. Please check your microphone.'
-        );
+        handleError('no-mic', language === 'hi' ? 'माइक्रोफ़ोन नहीं मिला।' : 'No microphone found. Check your mic.');
+      } else if (event.error === 'network') {
+        handleError('network', language === 'hi' ? 'नेटवर्क त्रुटि।' : 'Network error. Check connection.');
       } else if (event.error !== 'aborted') {
-        setError(language === 'hi' ? `वॉयस त्रुटि: ${event.error}` : `Voice error: ${event.error}. Please try again.`);
+        handleError('voice-error', language === 'hi' ? `वॉयस त्रुटि: ${event.error}` : `Voice error: ${event.error}`);
       }
+      setPhase('error');
     };
 
     recognition.onend = () => {
       clearSilenceTimeout();
-      setIsListening(false);
-      setInterim('');
       const candidate = finalTranscriptRef.current || interimRef.current;
       const filtered = candidate && candidate !== 'सुन रहा हूँ...' && candidate !== 'Listening...' ? candidate.trim() : '';
       if (!filtered) {
-        if (!hasProcessedRef.current && !isProcessingRef.current && !transcript && !finalTranscriptRef.current) {
-          // Avoid showing empty error if we already have a result displayed
-          // Only show if truly empty speech and not already processed
-          // Check if we already have parsed/response to avoid overwriting success
-          if (!parsed && !response) {
-            setError(
-              language === 'hi'
-                ? 'मैं आपका अनुरोध नहीं सुन पाया। माइक्रोफ़ोन दबाएँ और फिर से प्रयास करें।'
-                : "I didn't hear a request. Tap the microphone and try again."
-            );
+        if (!isProcessingRef.current && !parsed && !response) {
+          // Only show no-speech if we haven't already processed
+          if (phase === 'listening') {
+            handleError('no-speech', language === 'hi' ? 'मैंने कुछ नहीं सुना। फिर से बोलें।' : "I didn't hear anything. Please try again.");
           }
         }
+        setPhase((p) => (p === 'listening' ? 'idle' : p));
         return;
       }
-      if (hasProcessedRef.current || isProcessingRef.current) return;
-      hasProcessedRef.current = true;
+      if (isProcessingRef.current) return;
       setTranscript(filtered);
       interimRef.current = '';
+      console.log('[FRONTEND] recognition onend processing:', filtered);
       processTranscript(filtered);
     };
 
@@ -406,26 +563,29 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       recognition.start();
     } catch (e) {
       console.error(e);
-      setError(language === 'hi' ? 'माइक शुरू नहीं हो पाया।' : 'Could not start microphone.');
-      setIsListening(false);
-      clearSilenceTimeout();
+      handleError('mic-start', language === 'hi' ? 'माइक शुरू नहीं हो पाया।' : 'Could not start microphone.');
     }
-  }, [clearSilenceTimeout, getEffectiveSTTLang, language, parsed, processTranscript, response, stopSpeaking, transcript]);
+  }, [clearSilenceTimeout, getEffectiveSTTLang, language, parsed, processTranscript, response, stopSpeaking, handleError]);
 
   const handleTypedSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const val = typedInput.trim();
     if (!val) {
-      setError(language === 'hi' ? 'कृपया अपनी आवश्यकता टाइप करें।' : 'Please type your requirement.');
+      handleError('empty', language === 'hi' ? 'कृपया टाइप करें।' : 'Please type a message.');
       return;
     }
-    if (isProcessingRef.current) return;
-    hasProcessedRef.current = false;
+    if (isProcessingRef.current) {
+      console.log('[FRONTEND] handleTypedSubmit blocked, already processing');
+      return;
+    }
     clearSilenceTimeout();
+    // Let processTranscript handle isProcessingRef and phase — do NOT set here to avoid deadlock
+    console.log('[FRONTEND] typed submit:', val);
     setTranscript(val);
     finalTranscriptRef.current = val;
     interimRef.current = '';
     setError(null);
+    setErrorCode(null);
     setInterim('');
     processTranscript(val);
   };
@@ -446,9 +606,13 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     };
   }, [clearSilenceTimeout]);
 
-  const isIdle = !isListening && !isProcessing && !isSpeaking && !transcript && !parsed && !response;
-  const showRequirement = !!parsed && !isProcessing;
-  const showResponse = !!response && !isProcessing;
+  const isIdle = phase === 'idle' && !transcript && !parsed && !response && !error;
+  const showListening = phase === 'listening';
+  const showUnderstanding = phase === 'understanding';
+  const showSearching = phase === 'searching';
+  const showResponding = phase === 'responding';
+  const showSpeaking = phase === 'speaking';
+  const isProcessing = phase === 'understanding' || phase === 'searching' || phase === 'responding';
 
   const formatValue = (val: string | number | null | undefined) => {
     if (val === null || val === undefined || val === '') return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
@@ -467,18 +631,52 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     return date;
   };
 
+  const phaseLabel = (() => {
+    switch (phase) {
+      case 'listening':
+        return language === 'hi' ? 'सुन रहा हूँ...' : 'Listening...';
+      case 'understanding':
+        return language === 'hi' ? 'समझ रहा हूँ...' : 'Understanding...';
+      case 'searching':
+        return language === 'hi' ? 'FarmDirect में खोज रहा हूँ...' : 'Searching FarmDirect...';
+      case 'responding':
+        return language === 'hi' ? 'जवाब तैयार कर रहा हूँ...' : 'Generating response...';
+      case 'speaking':
+        return language === 'hi' ? 'बोल रहा हूँ...' : 'Speaking...';
+      default:
+        return language === 'hi' ? '🎙️ बोलने के लिए टैप करें' : '🎙️ Tap to Speak';
+    }
+  })();
+
+  const phaseSubLabel = (() => {
+    switch (phase) {
+      case 'listening':
+        return language === 'hi' ? 'स्वाभाविक रूप से बोलें...' : 'Speak naturally...';
+      case 'understanding':
+        return language === 'hi' ? 'आपकी बात को पार्स कर रहा हूँ...' : 'Parsing your request via AI...';
+      case 'searching':
+        return language === 'hi' ? 'बाज़ार डेटा में खोज...' : 'Querying marketplace database...';
+      case 'responding':
+        return language === 'hi' ? 'AI जवाब बना रहा है...' : 'AI is crafting response...';
+      case 'speaking':
+        return language === 'hi' ? 'सहायक बोल रहा है...' : 'Assistant is speaking...';
+      default:
+        return language === 'hi' ? 'माइक दबाएँ और बोलें' : 'Tap mic and speak';
+    }
+  })();
+
   return (
-    <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
       <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="relative z-10 flex flex-col items-center text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-4">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-semibold mb-4">
           <Sparkles size={14} />
           <span>{language === 'hi' ? 'वॉयस अनुरोध' : 'Voice Request'}</span>
         </div>
 
-        <h2 className="text-xl sm:text-2xl font-black text-white max-w-md uppercase tracking-tight">
+        <h2 className="text-xl sm:text-2xl font-black text-slate-900 max-w-md uppercase tracking-tight">
           {mode === 'consumer'
             ? language === 'hi'
               ? 'आज आपको क्या चाहिए?'
@@ -487,7 +685,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
               ? 'आप क्या बेचना चाहते हैं?'
               : 'What do you want to sell?'}
         </h2>
-        <p className="text-slate-400 text-sm mt-1 max-w-sm">
+        <p className="text-slate-500 text-sm mt-1 max-w-sm">
           {language === 'hi'
             ? 'अपनी आवश्यकता अंग्रेज़ी, हिंदी या Hinglish में बताएँ।'
             : 'Tell us what you need in English, Hindi or Hinglish.'}
@@ -495,82 +693,74 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
 
         <div className="my-8 relative flex flex-col items-center gap-3">
           <div className="relative flex items-center justify-center">
-            {(isListening || isProcessing || isSpeaking) && (
-              <div className={`absolute w-28 h-28 rounded-full animate-ping ${isSpeaking ? 'bg-teal-500/20' : 'bg-emerald-500/20'}`} />
+            {(phase === 'listening' || isProcessing || showSpeaking) && (
+              <div className={`absolute w-28 h-28 rounded-full animate-ping ${showSpeaking ? 'bg-teal-500/20' : 'bg-emerald-500/20'}`} />
             )}
             <button
-              onClick={isListening ? stopListening : isSpeaking ? stopSpeaking : startListening}
+              onClick={phase === 'listening' ? stopListening : showSpeaking ? stopSpeaking : () => startListening()}
               disabled={isProcessing}
-              aria-label={isListening ? 'Stop listening' : isSpeaking ? 'Stop speaking' : 'Tap to Speak'}
+              aria-label={phase === 'listening' ? 'Stop listening' : showSpeaking ? 'Stop speaking' : 'Tap to Speak'}
               className={`relative w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl cursor-pointer focus:outline-none focus:ring-4 focus:ring-emerald-500/20 ${
-                isListening
+                phase === 'listening'
                   ? 'bg-rose-500 text-white shadow-rose-500/30 scale-110'
                   : isProcessing
                     ? 'bg-amber-500 text-white shadow-amber-500/30 scale-105'
-                    : isSpeaking
+                    : showSpeaking
                       ? 'bg-teal-500 text-white shadow-teal-500/30 scale-105'
                       : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/30 hover:scale-105 active:scale-95'
-              }`}
+              } ${isProcessing ? 'opacity-90 cursor-not-allowed' : ''}`}
             >
-              {isListening ? <MicOff size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : isSpeaking ? <Volume2 size={32} className="animate-pulse" /> : <Mic size={32} />}
+              {phase === 'listening' ? <MicOff size={32} /> : isProcessing ? <Loader2 size={32} className="animate-spin" /> : showSpeaking ? <Volume2 size={32} className="animate-pulse" /> : <Mic size={32} />}
             </button>
           </div>
 
-          <div className="text-center">
-            <p className="text-sm font-semibold text-white">
-              {isListening
-                ? language === 'hi'
-                  ? 'सुन रहा हूँ...'
-                  : 'Listening...'
-                : isProcessing
-                  ? language === 'hi'
-                    ? 'समझ रहा हूँ...'
-                    : 'Understanding your request...'
-                  : isSpeaking
-                    ? language === 'hi'
-                      ? 'AI is responding...'
-                      : 'AI is responding...'
-                    : language === 'hi'
-                      ? '🎙️ बोलने के लिए टैप करें'
-                      : '🎙️ Tap to Speak'}
+          <div className="text-center min-h-[48px]">
+            <p className="text-sm font-semibold text-slate-900 flex items-center justify-center gap-2">
+              {showListening && <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />}
+              {showUnderstanding && <Brain size={14} className="text-amber-600 animate-pulse" />}
+              {showSearching && <Search size={14} className="text-blue-400 animate-pulse" />}
+              {showResponding && <Sparkles size={14} className="text-purple-400 animate-pulse" />}
+              {showSpeaking && <Volume2 size={14} className="text-teal-600 animate-pulse" />}
+              {phaseLabel}
             </p>
-            <p className="text-xs text-slate-500 mt-1">
-              {isListening
-                ? language === 'hi'
-                  ? 'स्वाभाविक रूप से बोलें...'
-                  : 'Speak naturally...'
-                : isProcessing
-                  ? language === 'hi'
-                    ? 'सबसे अच्छा मिलान ढूंढ रहा हूँ...'
-                    : 'Finding the best match...'
-                  : isSpeaking
-                    ? language === 'hi'
-                      ? 'सहायक बोल रहा है...'
-                      : 'AI is speaking...'
-                    : language === 'hi'
-                      ? 'माइक दबाएँ और स्वाभाविक रूप से बोलें'
-                      : 'Tap mic and speak naturally'}
-            </p>
+            <p className="text-xs text-slate-500 mt-1">{phaseSubLabel}</p>
+            {/* Progress dots for lifecycle */}
+            {(isProcessing || showSpeaking) && (
+              <div className="flex items-center justify-center gap-1.5 mt-2">
+                <span className={`w-1.5 h-1.5 rounded-full transition-colors ${phase === 'understanding' ? 'bg-amber-400 animate-pulse' : 'bg-slate-200'}`} />
+                <span className={`w-6 h-0.5 rounded-full transition-colors ${phase === 'understanding' ? 'bg-amber-400' : 'bg-slate-200'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full transition-colors ${phase === 'searching' ? 'bg-blue-400 animate-pulse' : phase === 'understanding' ? 'bg-slate-500' : 'bg-slate-200'}`} />
+                <span className={`w-6 h-0.5 rounded-full transition-colors ${phase === 'searching' ? 'bg-blue-400' : 'bg-slate-200'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full transition-colors ${phase === 'responding' ? 'bg-purple-400 animate-pulse' : phase === 'searching' ? 'bg-slate-500' : 'bg-slate-200'}`} />
+                <span className={`w-6 h-0.5 rounded-full transition-colors ${phase === 'responding' ? 'bg-purple-400' : 'bg-slate-200'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full transition-colors ${showSpeaking ? 'bg-teal-400 animate-pulse' : 'bg-slate-200'}`} />
+              </div>
+            )}
           </div>
 
-          {isListening && (
-            <Button variant="outline" size="sm" icon={<Square size={14} />} onClick={stopListening} className="mt-2">
+          {phase === 'listening' && (
+            <Button variant="outline" size="sm" icon={<Square size={14} />} onClick={stopListening} className="mt-1">
               {language === 'hi' ? 'रोकें' : 'Stop'}
+            </Button>
+          )}
+          {showSpeaking && (
+            <Button variant="outline" size="sm" onClick={stopSpeaking} className="mt-1">
+              {language === 'hi' ? 'बोलना रोकें' : 'Stop speaking'}
             </Button>
           )}
         </div>
 
         <div className="w-full max-w-md">
           <div className="flex items-center gap-3 my-4">
-            <div className="h-px flex-1 bg-slate-700/60" />
+            <div className="h-px flex-1 bg-slate-200" />
             <span className="text-[11px] tracking-widest text-slate-500 uppercase font-semibold">
               {language === 'hi' ? 'या' : 'or'}
             </span>
-            <div className="h-px flex-1 bg-slate-700/60" />
+            <div className="h-px flex-1 bg-slate-200" />
           </div>
 
           <form onSubmit={handleTypedSubmit} className="space-y-2 text-left">
-            <label htmlFor="voice-typed-input" className="block text-xs font-semibold text-slate-300">
+            <label htmlFor="voice-typed-input" className="block text-xs font-semibold text-slate-600">
               {language === 'hi' ? 'या अपनी आवश्यकता टाइप करें' : 'Or type your requirement'}
             </label>
             <div className="flex gap-2">
@@ -586,63 +776,90 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                       ? 'उदा. मुझे 500 किलो टमाटर चाहिए'
                       : 'I need 500 kg Grade A tomatoes in Ghaziabad tomorrow.'
                   }
-                  className="w-full h-11 pl-10 pr-3 rounded-xl bg-slate-950/70 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40"
-                  disabled={isListening || isProcessing}
+                  className="w-full h-11 pl-10 pr-3 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40"
+                  disabled={phase === 'listening' || isProcessing}
                 />
               </div>
-              <Button type="submit" variant="secondary" size="md" disabled={isListening || isProcessing}>
+              <Button type="submit" variant="secondary" size="md" disabled={phase === 'listening' || isProcessing}>
                 {language === 'hi' ? 'भेजें' : 'Send'}
               </Button>
             </div>
-            <p className="text-[11px] text-slate-500">
-              {language === 'hi' ? 'टाइप करके Enter दबाएँ — तुरंत प्रोसेस होगा' : 'Press Enter to send — auto-processed'}
-            </p>
+            {!hasSpeechRecognition() && (
+              <p className="text-[11px] text-amber-300">
+                {language === 'hi' ? 'वॉयस उपलब्ध नहीं — टाइप करें' : 'Voice unavailable — type to continue'}
+              </p>
+            )}
           </form>
         </div>
 
-        {isListening && interim && (
-          <div className="w-full max-w-lg mt-6 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-left">
-            <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">
-              {language === 'hi' ? 'सुन रहा हूँ...' : 'Listening...'}
+        {phase === 'listening' && interim && (
+          <div className="w-full max-w-lg mt-6 bg-white/60 border border-slate-200 rounded-2xl p-4 text-left">
+            <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" /> {language === 'hi' ? 'सुन रहा हूँ...' : 'Listening...'}
             </p>
-            <p className="text-sm text-slate-200 italic animate-pulse">“{interim}”</p>
+            <p className="text-sm text-slate-800 italic animate-pulse">“{interim}”</p>
           </div>
         )}
 
-        {transcript && !isListening && !isProcessing && !isSpeaking && !parsed && !response && !error && (
-          <div className="w-full max-w-lg mt-6 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-left">
-            <p className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">
+        {transcript && phase !== 'listening' && !isProcessing && !showSpeaking && !parsed && !response && !error && (
+          <div className="w-full max-w-lg mt-6 bg-white/60 border border-slate-200 rounded-2xl p-4 text-left">
+            <p className="text-xs font-bold tracking-wider text-slate-500 uppercase mb-2">
               {language === 'hi' ? 'आपने कहा:' : 'You said:'}
             </p>
-            <p className="text-sm font-medium text-white bg-slate-900 border border-slate-800 rounded-xl p-3">“{transcript}”</p>
+            <p className="text-sm font-medium text-slate-900 bg-white border border-slate-200 rounded-xl p-3">“{transcript}”</p>
           </div>
         )}
 
-        {isProcessing && (
-          <Card className="w-full max-w-lg mt-6 bg-slate-950/60 border-slate-800 p-4 text-left">
-            <div className="flex items-center gap-3">
-              <Loader2 size={18} className="animate-spin text-amber-400" />
-              <div>
-                <p className="text-sm font-semibold text-white">
-                  {language === 'hi' ? 'आपके अनुरोध को समझ रहा हूँ...' : 'Understanding your request...'}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {language === 'hi' ? 'सबसे अच्छा मिलान ढूंढ रहा हूँ...' : 'Finding the best match...'}
-                </p>
+        {/* Phased processing indicator — tied to real lifecycle, no fake delays */}
+        {(showUnderstanding || showSearching || showResponding) && (
+          <Card className="w-full max-w-lg mt-6 bg-white/60 border-slate-200 p-4 text-left">
+            <div className="space-y-3">
+              <div className={`flex items-center gap-3 ${showUnderstanding ? 'opacity-100' : 'opacity-40'}`}>
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${showUnderstanding ? 'bg-amber-500/20 text-amber-600 border border-amber-500/30' : 'bg-white text-slate-500'}`}>
+                  {showUnderstanding ? <Loader2 size={16} className="animate-spin" /> : <Brain size={16} />}
+                </div>
+                <div>
+                  <p className={`text-sm font-semibold ${showUnderstanding ? 'text-white' : 'text-slate-500'}`}>{language === 'hi' ? 'समझ रहा हूँ...' : 'Understanding...'}</p>
+                  <p className="text-xs text-slate-500">{language === 'hi' ? 'AI आपकी बात को पार्स कर रहा है' : 'Parsing via /api/voice-intent'}</p>
+                </div>
+                {showUnderstanding && <Loader2 size={14} className="ml-auto animate-spin text-amber-600" />}
+                {!showUnderstanding && (phase as string) !== 'understanding' && <CheckCircle2 size={14} className="ml-auto text-emerald-600" />}
+              </div>
+              <div className={`flex items-center gap-3 ${showSearching ? 'opacity-100' : showUnderstanding ? 'opacity-40' : 'opacity-100'}`}>
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${showSearching ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-white text-slate-500'}`}>
+                  {showSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                </div>
+                <div>
+                  <p className={`text-sm font-semibold ${showSearching ? 'text-white' : 'text-slate-500'}`}>{language === 'hi' ? 'FarmDirect में खोज...' : 'Searching FarmDirect...'}</p>
+                  <p className="text-xs text-slate-500">{language === 'hi' ? 'बाज़ार डेटा में खोज' : 'Querying marketplace database'}</p>
+                </div>
+                {showSearching && <Loader2 size={14} className="ml-auto animate-spin text-blue-400" />}
+                {(phase as string) === 'responding' || (phase as string) === 'speaking' ? <CheckCircle2 size={14} className="ml-auto text-emerald-600" /> : null}
+              </div>
+              <div className={`flex items-center gap-3 ${showResponding ? 'opacity-100' : 'opacity-40'}`}>
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${showResponding ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-white text-slate-500'}`}>
+                  {showResponding ? <Loader2 size={16} className="animate-spin" /> : <Store size={16} />}
+                </div>
+                <div>
+                  <p className={`text-sm font-semibold ${showResponding ? 'text-white' : 'text-slate-500'}`}>{language === 'hi' ? 'जवाब बना रहा हूँ...' : 'Generating response...'}</p>
+                  <p className="text-xs text-slate-500">AI via /api/assistant-response</p>
+                </div>
+                {showResponding && <Loader2 size={14} className="ml-auto animate-spin text-purple-400" />}
               </div>
             </div>
             {transcript && (
-              <p className="text-xs text-slate-400 mt-3 italic">“{transcript}”</p>
+              <p className="text-xs text-slate-500 mt-3 italic">“{transcript}”</p>
             )}
           </Card>
         )}
 
-        {error && !isProcessing && (
+        {error && (
           <Card className="w-full max-w-lg mt-4 bg-rose-500/10 border-rose-500/30 p-4 text-left">
             <div className="flex gap-2.5">
               <AlertCircle size={16} className="text-rose-400 mt-0.5 shrink-0" />
               <div className="flex-1">
-                <p className="text-sm font-medium text-rose-200">{error}</p>
+                <p className="text-sm font-medium text-rose-700">{error}</p>
+                {errorCode && <p className="text-[11px] text-rose-300/60 mt-1 font-mono">[{errorCode}]</p>}
                 <p className="text-xs text-rose-300/80 mt-1">
                   {language === 'hi'
                     ? 'सुझाव: स्पष्ट बोलें या टाइप करें — जैसे “500 किलो टमाटर चाहिए”'
@@ -650,82 +867,67 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                 </p>
               </div>
             </div>
-            <div className="flex gap-2 mt-3">
-              <Button variant="outline" size="sm" onClick={handleTryAgain}>
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <Button variant="outline" size="sm" onClick={resetForNext}>
                 {language === 'hi' ? 'फिर से कोशिश करें' : 'Try Again'}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setError(null)}>
                 {language === 'hi' ? 'बंद करें' : 'Dismiss'}
               </Button>
+              {errorCode === 'permission-denied' && (
+                <span className="text-[11px] text-slate-500 self-center">Check browser site settings → Microphone → Allow</span>
+              )}
             </div>
           </Card>
         )}
 
-        {showRequirement && parsed && (
-          <Card className="w-full max-w-lg mt-6 bg-slate-900 border-slate-700/80 p-0 overflow-hidden text-left">
-            <div className="p-4 border-b border-slate-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Sparkles size={14} className="text-emerald-400" />
-                {language === 'hi' ? 'आपकी आवश्यकता' : 'Your Requirement'}
+        {parsed && phase !== 'understanding' && !isProcessing && (
+          <Card className="w-full max-w-lg mt-6 bg-white border-slate-200 p-0 overflow-hidden text-left">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Sparkles size={14} className="text-emerald-600" />
+                {language === 'hi' ? 'समझा गया अनुरोध' : 'Understood Request'}
               </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                {language === 'hi' ? 'parseVoiceIntent() द्वारा निकाला गया' : 'Extracted via parseVoiceIntent()'}
-              </p>
+              <Badge variant={parsed.intent === 'BUYER' ? 'blue' : parsed.intent === 'SELLER' ? 'emerald' : 'slate'}>
+                {parsed.intent}
+              </Badge>
             </div>
             <div className="divide-y divide-slate-800 text-sm">
               <div className="flex justify-between p-3">
-                <span className="text-slate-400">Intent</span>
-                <Badge variant={parsed.intent === 'BUYER' ? 'blue' : parsed.intent === 'SELLER' ? 'emerald' : 'slate'}>
-                  {parsed.intent}
-                </Badge>
+                <span className="text-slate-500">{language === 'hi' ? 'उत्पाद' : 'Product'}</span>
+                <span className="font-semibold text-slate-900">{formatValue(parsed.product)}</span>
               </div>
               <div className="flex justify-between p-3">
-                <span className="text-slate-400">{language === 'hi' ? 'उत्पाद' : 'Product'}</span>
-                <span className="font-semibold text-white">{formatValue(parsed.product)}</span>
+                <span className="text-slate-500">{language === 'hi' ? 'मात्रा' : 'Quantity'}</span>
+                <span className="font-semibold text-slate-900">{formatQuantity(parsed)}</span>
               </div>
               <div className="flex justify-between p-3">
-                <span className="text-slate-400">{language === 'hi' ? 'मात्रा' : 'Quantity'}</span>
-                <span className="font-semibold text-white">{formatQuantity(parsed)}</span>
+                <span className="text-slate-500">{language === 'hi' ? 'गुणवत्ता' : 'Quality'}</span>
+                <span className="font-semibold text-slate-900">{formatValue(parsed.quality)}</span>
               </div>
               <div className="flex justify-between p-3">
-                <span className="text-slate-400">{language === 'hi' ? 'गुणवत्ता' : 'Quality'}</span>
-                <span className="font-semibold text-white">{formatValue(parsed.quality)}</span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-slate-400">Location</span>
-                <span className="font-semibold text-white">{formatValue(parsed.location)}</span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-slate-400">Date</span>
-                <span className="font-semibold text-white">{formatDate(parsed.date)}</span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-slate-400">Price</span>
-                <span className="font-semibold text-white">
-                  {parsed.price !== null && parsed.price !== undefined ? `₹${parsed.price}/kg` : language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified'}
-                </span>
+                <span className="text-slate-500">Location</span>
+                <span className="font-semibold text-slate-900">{formatValue(parsed.location)}</span>
               </div>
             </div>
-            {parsed.intent === 'UNKNOWN' && (
-              <div className="p-3 bg-amber-500/10 border-t border-amber-500/20 text-xs text-amber-200">
-                {language === 'hi'
-                  ? 'इरादा स्पष्ट नहीं — कृपया “चाहिए” या “बेचना है” जैसे शब्दों का उपयोग करें।'
-                  : 'Intent unclear — try including “need” / “want to buy” or “have to sell”.'}
+            {resultSummary && (
+              <div className="p-3 bg-emerald-500/10 border-t border-emerald-500/20 text-xs text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 size={14} className="text-emerald-600" /> {resultSummary}
               </div>
             )}
           </Card>
         )}
 
-        {showResponse && response && (
+        {response && (
           <Card className="w-full max-w-lg mt-4 bg-emerald-500/10 border-emerald-500/20 p-4 text-left">
-            <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-emerald-400 uppercase mb-2">
+            <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-emerald-600 uppercase mb-2">
               <Volume2 size={14} className={isSpeaking ? 'animate-pulse text-teal-400' : ''} />
               <span>{language === 'hi' ? 'सहायक प्रतिक्रिया' : 'Assistant Response'}</span>
-              {isSpeaking && <span className="ml-auto text-teal-400 animate-pulse text-[11px]">● Speaking</span>}
+              {isSpeaking && <span className="ml-auto text-teal-600 animate-pulse text-[11px]">● Speaking</span>}
               {!isSpeaking && (
                 <button
                   onClick={() => speak(response)}
-                  className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
+                  className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-200 text-emerald-300 hover:bg-emerald-500/30"
                 >
                   {language === 'hi' ? 'फिर सुनें' : 'Replay'}
                 </button>
@@ -739,46 +941,19 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                 </button>
               )}
             </div>
-            <p className="text-sm text-slate-100 leading-relaxed">{response}</p>
-            <p className="text-[11px] text-slate-500 mt-2 flex items-center gap-1">
-              {language === 'hi' ? 'generateAssistantResponse() द्वारा • ब्राउज़र TTS से बोला जा रहा है' : 'via generateAssistantResponse() • spoken with browser TTS'}
-              {isSpeaking && <span className="text-teal-400"> • {detectResponseLanguage(response) === 'hi' ? 'hi-IN' : 'en-IN'}</span>}
-            </p>
+            <p className="text-sm text-slate-900 leading-relaxed">{response}</p>
+            {isSpeaking && <p className="text-[11px] text-teal-300 mt-2 animate-pulse">🔊 Speaking in {detectResponseLanguage(response) === 'hi' ? 'Hindi' : 'English'}...</p>}
           </Card>
         )}
 
-        {showRequirement && parsed && parsed.intent !== 'UNKNOWN' && onProceed && (
-          <div className="w-full max-w-lg mt-4">
-            {parsed.intent === 'BUYER' ? (
-              <Button variant="primary" size="lg" icon={<ArrowRight size={18} />} onClick={onProceed} className="w-full">
-                {language === 'hi' ? 'किसान खोजें' : 'Find Farmers'}
-              </Button>
-            ) : (
-              <Button variant="primary" size="lg" icon={<ArrowRight size={18} />} onClick={onProceed} className="w-full bg-teal-600 hover:bg-teal-700 border-teal-500">
-                {language === 'hi' ? 'खरीदार खोजें' : 'Find Buyers'}
-              </Button>
-            )}
-            <p className="text-[11px] text-slate-500 mt-2">
-              {parsed.intent === 'BUYER'
-                ? language === 'hi'
-                  ? 'अगले चरण में matchFarmers() चलेगा (Step 8)'
-                  : 'Next step will connect to matchFarmers() (Step 8)'
-                : language === 'hi'
-                  ? 'अगले चरण में matchBuyers() चलेगा'
-                  : 'Next step will connect to matchBuyers()'}
-            </p>
-          </div>
+        {/* Mic remains available — no extra Process button needed */}
+        {(response || parsed) && !isProcessing && (
+          <p className="text-[11px] text-slate-500 mt-4 flex items-center gap-1.5">
+            <Mic size={11} /> {language === 'hi' ? 'फिर से बोलने के लिए माइक दबाएँ' : 'Tap mic to speak again — auto-submits'}
+          </p>
         )}
 
-        {showRequirement && parsed?.intent === 'UNKNOWN' && (
-          <div className="w-full max-w-lg mt-3">
-            <Button variant="outline" size="md" onClick={handleTryAgain} className="w-full">
-              {language === 'hi' ? 'फिर से कोशिश करें' : 'Try Again'}
-            </Button>
-          </div>
-        )}
-
-        {isIdle && !error && (
+        {isIdle && (
           <p className="text-[11px] text-slate-500 mt-4 max-w-md">
             {language === 'hi'
               ? 'उदाहरण: “मुझे 500 किलो Grade A टमाटर चाहिए, गाज़ियाबाद में कल तक”'
@@ -789,3 +964,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     </div>
   );
 };
+
+
+
+

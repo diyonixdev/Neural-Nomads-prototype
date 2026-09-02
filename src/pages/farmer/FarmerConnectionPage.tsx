@@ -27,20 +27,20 @@ export const FarmerConnectionPage: React.FC = () => {
         <Badge variant="emerald" className="mb-2">
           {language === 'hi' ? 'सीधा संपर्क सिमुलेशन' : 'Direct Producer-Buyer Call'}
         </Badge>
-        <h1 className="text-2xl font-bold text-white">
+        <h1 className="text-2xl font-bold text-slate-900">
           {language === 'hi' ? 'खरीदार के साथ सीधी बातचीत' : 'Direct Buyer Negotiation Call'}
         </h1>
       </div>
 
-      <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden text-center">
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden text-center">
         <div className="flex flex-col items-center">
           <img
             src={buyer.avatar}
             alt={buyer.name}
             className="w-24 h-24 rounded-full object-cover border-4 border-teal-500 shadow-xl mb-4"
           />
-          <h2 className="text-xl font-bold text-white">{buyer.name}</h2>
-          <p className="text-xs text-slate-400">{buyer.location} • {buyer.type}</p>
+          <h2 className="text-xl font-bold text-slate-900">{buyer.name}</h2>
+          <p className="text-xs text-slate-500">{buyer.location} • {buyer.type}</p>
 
           <div className="mt-3">
             {callStatus === 'connecting' && <Badge variant="amber">Connecting to Store Procurement Team...</Badge>}
@@ -54,19 +54,19 @@ export const FarmerConnectionPage: React.FC = () => {
         </div>
 
         {/* Live Audio Transcript */}
-        <div className="mt-6 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl text-left space-y-2 text-xs">
-          <span className="font-semibold uppercase tracking-wider text-teal-400 block mb-2">
+        <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left space-y-2 text-xs">
+          <span className="font-semibold uppercase tracking-wider text-teal-600 block mb-2">
             AI Automated Price Negotiation Assistant
           </span>
-          <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
-            <span className="font-bold text-cyan-400">Buyer Procurement: </span>
-            <span className="text-slate-300">
+          <div className="p-2 rounded-lg bg-white border border-slate-200">
+            <span className="font-bold text-cyan-600">Buyer Procurement: </span>
+            <span className="text-slate-600">
               "We confirm 500 kg Grade A tomatoes at ₹28/kg with instant payment upon delivery."
             </span>
           </div>
-          <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
-            <span className="font-bold text-amber-400">Farmer: </span>
-            <span className="text-slate-300">
+          <div className="p-2 rounded-lg bg-white border border-slate-200">
+            <span className="font-bold text-amber-600">Farmer: </span>
+            <span className="text-slate-600">
               "Deal pakka. Hum farm pickup ke liye crate pack kar rahe hain."
             </span>
           </div>
@@ -93,3 +93,6 @@ export const FarmerConnectionPage: React.FC = () => {
     </div>
   );
 };
+
+
+

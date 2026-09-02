@@ -1,0 +1,35 @@
+[
+  {
+    "id": "prod-001",
+    "name": "Grade A Tomatoes - Green Valley FPO",
+    "category": "vegetables",
+    "grade": "Grade A",
+    "quantityKg": 800,
+    "expectedPricePerKg": 27,
+    "mandiPricePerKg": 18,
+    "harvestDate": "2026-09-01",
+    "location": "Dasna, Ghaziabad",
+    "state": "Uttar Pradesh",
+    "farmerId": "f-001",
+    "shelfLifeDays": 5,
+    "image": "https://images.unsplash.com/photo-1546094096-0df4bcaaa337?w=800&auto=format&fit=crop&q=80",
+    "nameHi": "Grade A Tomatoes - Green Valley FPO",
+    "fpoId": "fpo-001",
+    "availableFrom": "2026-09-02T06:00:00+05:30",
+    "availableUntil": "2026-09-03T18:00:00+05:30",
+    "brixScore": 4.9,
+    "pesticideResidueStatus": "clear",
+    "certifications": [
+      "Grade A",
+      "FPO QC verified"
+    ],
+    "storageRequirements": {
+      "temperatureCMin": 8,
+      "temperatureCMax": 12,
+      "humidityPctMin": 85,
+      "humidityPctMax": 95,
+      "coldChainRequired": true
+    },
+    "updatedAt": "2026-09-02T14:00:41.279Z"
+  }
+]

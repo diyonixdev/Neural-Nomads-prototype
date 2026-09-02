@@ -24,10 +24,10 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ timeline }) => {
   };
 
   return (
-    <Card className="border-slate-700/80 bg-slate-800/90">
-      <h3 className="font-bold text-slate-100 text-sm sm:text-base mb-4 flex items-center justify-between">
+    <Card className="border-slate-200 bg-white shadow-sm">
+      <h3 className="font-bold text-slate-900 text-sm sm:text-base mb-4 flex items-center justify-between">
         <span>{language === 'hi' ? 'लाइव ऑर्डर प्रगति' : 'Live Order Journey & P0 Pipeline'}</span>
-        <span className="text-xs text-emerald-400 font-normal">
+        <span className="text-xs text-emerald-600 font-normal">
           {timeline.filter(t => t.status === 'completed').length} of {timeline.length} {language === 'hi' ? 'चरण पूर्ण' : 'Steps Complete'}
         </span>
       </h3>
@@ -38,7 +38,7 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ timeline }) => {
             {idx < timeline.length - 1 && (
               <div
                 className={`absolute left-4 top-7 bottom-0 w-0.5 ${
-                  step.status === 'completed' ? 'bg-emerald-500/80' : 'bg-slate-700'
+                  step.status === 'completed' ? 'bg-emerald-500/80' : 'bg-slate-200'
                 }`}
               />
             )}
@@ -46,10 +46,10 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ timeline }) => {
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 ${
                 step.status === 'completed'
-                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
+                  ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
                   : step.status === 'in_progress'
                   ? 'bg-amber-500 text-white animate-pulse ring-4 ring-amber-500/20'
-                  : 'bg-slate-800 text-slate-500 border border-slate-700'
+                  : 'bg-slate-100 text-slate-400 border border-slate-200'
               }`}
             >
               {getIcon(step.iconName, 15)}
@@ -58,15 +58,15 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({ timeline }) => {
             <div className="flex-1 pb-2">
               <div className="flex items-center justify-between">
                 <h4 className={`text-sm font-semibold ${
-                  step.status === 'completed' ? 'text-slate-200' : step.status === 'in_progress' ? 'text-amber-400 font-bold' : 'text-slate-400'
+                  step.status === 'completed' ? 'text-slate-800' : step.status === 'in_progress' ? 'text-amber-600 font-bold' : 'text-slate-500'
                 }`}>
                   {language === 'hi' ? step.titleHi : step.title}
                 </h4>
                 {step.timestamp && (
-                  <span className="text-xs font-mono text-slate-400">{step.timestamp}</span>
+                  <span className="text-xs font-mono text-slate-500">{step.timestamp}</span>
                 )}
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 {language === 'hi' ? step.descriptionHi : step.description}
               </p>
             </div>

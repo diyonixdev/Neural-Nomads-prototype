@@ -8,11 +8,11 @@ export const NotFoundPage: React.FC = () => {
 
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-6 space-y-4">
-      <div className="w-16 h-16 rounded-3xl bg-slate-800 border border-slate-700 flex items-center justify-center text-2xl font-black text-emerald-400">
+      <div className="w-16 h-16 rounded-3xl bg-white border border-slate-200 flex items-center justify-center text-2xl font-black text-emerald-600">
         404
       </div>
-      <h1 className="text-2xl font-bold text-white">Page Not Found</h1>
-      <p className="text-slate-400 text-sm max-w-sm">
+      <h1 className="text-2xl font-bold text-slate-900">Page Not Found</h1>
+      <p className="text-slate-500 text-sm max-w-sm">
         The requested agricultural route does not exist in the prototype.
       </p>
       <Button variant="primary" icon={<Home size={16} />} onClick={() => navigate('/')}>
@@ -21,3 +21,5 @@ export const NotFoundPage: React.FC = () => {
     </div>
   );
 };
+
+

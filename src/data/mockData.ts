@@ -594,6 +594,7 @@ export const mockProduceListings: Produce[] = [
     state: 'Uttar Pradesh',
     farmerId: 'f-001',
     fpoId: 'fpo-001',
+    image: 'https://images.unsplash.com/photo-1546094096-0df4bcaaa337?w=800&auto=format&fit=crop&q=80',
     availableFrom: '2026-09-02T06:00:00+05:30',
     availableUntil: '2026-09-03T18:00:00+05:30',
     shelfLifeDays: 5,

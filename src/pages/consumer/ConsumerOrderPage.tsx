@@ -17,16 +17,16 @@ export const ConsumerOrderPage: React.FC = () => {
         <div>
           <button
             onClick={() => navigate('/consumer/matches')}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
           >
             <ArrowLeft size={14} />
             <span>Back to Matches</span>
           </button>
-          <h1 className="text-2xl font-black text-white">
+          <h1 className="text-2xl font-black text-slate-900">
             {language === 'hi' ? 'सीधा ऑर्डर अनुबंध सारांश' : 'Direct Farm Contract & Order Lock'}
           </h1>
-          <p className="text-slate-400 text-sm">
-            Contract ID: <span className="font-mono text-emerald-400">{activeOrder.id}</span>
+          <p className="text-slate-500 text-sm">
+            Contract ID: <span className="font-mono text-emerald-600">{activeOrder.id}</span>
           </p>
         </div>
         <Badge variant="emerald" icon={<ShieldCheck size={14} />}>
@@ -35,69 +35,69 @@ export const ConsumerOrderPage: React.FC = () => {
       </div>
 
       {/* Contract Breakdown Card */}
-      <Card className="border-slate-700/80 bg-slate-800/90 p-6 space-y-6">
+      <Card className="border-slate-200 bg-white p-6 space-y-6">
         {/* Parties */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-6 border-b border-slate-700/80">
-          <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800">
-            <span className="text-xs text-slate-400 uppercase font-semibold">Farmer / Producer</span>
-            <h4 className="font-bold text-white text-base mt-1">{activeOrder.farmer.name}</h4>
-            <p className="text-xs text-slate-400">{activeOrder.farmer.village}, {activeOrder.farmer.district}</p>
-            <p className="text-xs text-emerald-400 mt-1 font-medium">{activeOrder.farmer.fpoName}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-6 border-b border-slate-200">
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <span className="text-xs text-slate-500 uppercase font-semibold">Farmer / Producer</span>
+            <h4 className="font-bold text-slate-900 text-base mt-1">{activeOrder.farmer.name}</h4>
+            <p className="text-xs text-slate-500">{activeOrder.farmer.village}, {activeOrder.farmer.district}</p>
+            <p className="text-xs text-emerald-600 mt-1 font-medium">{activeOrder.farmer.fpoName}</p>
           </div>
 
-          <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800">
-            <span className="text-xs text-slate-400 uppercase font-semibold">Buyer / Consumer</span>
-            <h4 className="font-bold text-white text-base mt-1">{activeOrder.buyer.name}</h4>
-            <p className="text-xs text-slate-400">{activeOrder.buyer.location}</p>
-            <p className="text-xs text-cyan-400 mt-1 font-medium">{activeOrder.buyer.type}</p>
+          <div className="p-4 bg-white rounded-xl border border-slate-200">
+            <span className="text-xs text-slate-500 uppercase font-semibold">Buyer / Consumer</span>
+            <h4 className="font-bold text-slate-900 text-base mt-1">{activeOrder.buyer.name}</h4>
+            <p className="text-xs text-slate-500">{activeOrder.buyer.location}</p>
+            <p className="text-xs text-cyan-600 mt-1 font-medium">{activeOrder.buyer.type}</p>
           </div>
         </div>
 
         {/* Commodity & Pricing Comparison */}
         <div className="space-y-4">
-          <h3 className="text-sm font-bold text-slate-200">Price & Economic Surplus Breakdown</h3>
+          <h3 className="text-sm font-bold text-slate-800">Price & Economic Surplus Breakdown</h3>
 
-          <div className="p-4 bg-slate-950/70 rounded-2xl border border-slate-800 space-y-3">
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
             <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Produce & Grade</span>
-              <span className="font-semibold text-white">{activeOrder.produce.name} ({activeOrder.produce.grade})</span>
+              <span className="text-slate-500">Produce & Grade</span>
+              <span className="font-semibold text-slate-900">{activeOrder.produce.name} ({activeOrder.produce.grade})</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Total Quantity</span>
-              <span className="font-semibold text-amber-400">{formatKg(activeOrder.quantityKg)}</span>
+              <span className="text-slate-500">Total Quantity</span>
+              <span className="font-semibold text-amber-600">{formatKg(activeOrder.quantityKg)}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Direct Agreed Rate</span>
-              <span className="font-bold text-emerald-400">{formatCurrency(activeOrder.agreedPricePerKg)} / kg</span>
+              <span className="text-slate-500">Direct Agreed Rate</span>
+              <span className="font-bold text-emerald-600">{formatCurrency(activeOrder.agreedPricePerKg)} / kg</span>
             </div>
-            <div className="flex justify-between text-base font-extrabold pt-3 border-t border-slate-800 text-white">
+            <div className="flex justify-between text-base font-extrabold pt-3 border-t border-slate-200 text-slate-900">
               <span>Total Direct Contract Value</span>
-              <span className="text-emerald-400">{formatCurrency(activeOrder.totalAmount)}</span>
+              <span className="text-emerald-600">{formatCurrency(activeOrder.totalAmount)}</span>
             </div>
           </div>
 
           {/* Intermediary Comparison Banner */}
-          <div className="grid grid-cols-2 gap-3 p-4 bg-emerald-950/20 border border-emerald-500/30 rounded-2xl">
+          <div className="grid grid-cols-2 gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
             <div>
-              <span className="text-xs text-slate-400 flex items-center gap-1">
-                <TrendingDown size={14} className="text-emerald-400" /> Buyer Paid Middleman Market
+              <span className="text-xs text-slate-500 flex items-center gap-1">
+                <TrendingDown size={14} className="text-emerald-600" /> Buyer Paid Middleman Market
               </span>
-              <p className="text-base font-bold text-slate-300 mt-0.5 line-through">
+              <p className="text-base font-bold text-slate-600 mt-0.5 line-through">
                 {formatCurrency(activeOrder.retailBenchmarkTotal)}
               </p>
-              <span className="text-xs text-emerald-400 font-semibold">
+              <span className="text-xs text-emerald-600 font-semibold">
                 You saved {formatCurrency(activeOrder.retailBenchmarkTotal - activeOrder.totalAmount)} (24%)
               </span>
             </div>
 
             <div>
-              <span className="text-xs text-slate-400 flex items-center gap-1">
-                <TrendingUp size={14} className="text-emerald-400" /> Farmer Mandi Alternative
+              <span className="text-xs text-slate-500 flex items-center gap-1">
+                <TrendingUp size={14} className="text-emerald-600" /> Farmer Mandi Alternative
               </span>
-              <p className="text-base font-bold text-slate-300 mt-0.5 line-through">
+              <p className="text-base font-bold text-slate-600 mt-0.5 line-through">
                 {formatCurrency(activeOrder.mandiBenchmarkTotal)}
               </p>
-              <span className="text-xs text-emerald-400 font-semibold">
+              <span className="text-xs text-emerald-600 font-semibold">
                 Farmer earned +{formatCurrency(activeOrder.totalAmount - activeOrder.mandiBenchmarkTotal)} (47%)
               </span>
             </div>
@@ -128,3 +128,7 @@ export const ConsumerOrderPage: React.FC = () => {
     </div>
   );
 };
+
+
+
+

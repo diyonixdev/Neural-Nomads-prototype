@@ -19,7 +19,7 @@ export const FarmerCard: React.FC<FarmerCardProps> = ({ match, onConnect, onView
   const { farmer, produce, matchScore, offeredPricePerKg, estimatedSavingsPct, directGainPct } = match;
 
   return (
-    <Card hover className="flex flex-col justify-between border-slate-700/80 bg-slate-800/90">
+    <Card hover className="flex flex-col justify-between border-slate-200 bg-white shadow-sm">
       <div>
         {/* Header with Avatar & Details */}
         <div className="flex items-start justify-between gap-4">
@@ -27,24 +27,24 @@ export const FarmerCard: React.FC<FarmerCardProps> = ({ match, onConnect, onView
             <img
               src={farmer.avatar}
               alt={farmer.name}
-              className="w-13 h-13 rounded-full object-cover border-2 border-emerald-500/40"
+              className="w-13 h-13 rounded-full object-cover border-2 border-emerald-200"
             />
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-100 text-base">
+                <h3 className="font-bold text-slate-900 text-base">
                   {language === 'hi' ? farmer.nameHi : farmer.name}
                 </h3>
                 {farmer.fpoMember && (
                   <Badge variant="emerald" size="sm">FPO Verified</Badge>
                 )}
               </div>
-              <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
+              <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
                 <span className="flex items-center gap-1">
-                  <MapPin size={12} className="text-emerald-400" />
+                  <MapPin size={12} className="text-emerald-600" />
                   {farmer.village}, {farmer.district} ({farmer.distanceKm} km)
                 </span>
-                <span className="flex items-center gap-1 text-amber-400 font-semibold">
-                  <Star size={12} className="fill-amber-400" />
+                <span className="flex items-center gap-1 text-amber-600 font-semibold">
+                  <Star size={12} className="fill-amber-400 text-amber-500" />
                   {farmer.rating} ({farmer.totalDeals} deals)
                 </span>
               </div>
@@ -54,35 +54,35 @@ export const FarmerCard: React.FC<FarmerCardProps> = ({ match, onConnect, onView
         </div>
 
         {/* Produce & Price Banner */}
-        <div className="mt-4 p-3.5 bg-slate-900/80 rounded-xl border border-slate-800/80">
+        <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 {language === 'hi' ? 'उपलब्ध फसल' : 'Offered Crop'}
               </span>
-              <p className="text-sm font-bold text-slate-100 mt-0.5">
+              <p className="text-sm font-bold text-slate-900 mt-0.5">
                 {language === 'hi' ? produce.nameHi : produce.name}
               </p>
             </div>
             <div className="text-right">
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500">
                 {language === 'hi' ? 'सीधा मूल्य' : 'Direct Price'}
               </span>
               <div className="flex items-baseline gap-1">
-                <span className="text-lg font-black text-emerald-400">
+                <span className="text-lg font-black text-emerald-600">
                   {formatCurrency(offeredPricePerKg)}
                 </span>
-                <span className="text-xs text-slate-400">/kg</span>
+                <span className="text-xs text-slate-500">/kg</span>
               </div>
             </div>
           </div>
 
-          <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400 flex items-center gap-1">
-              <TrendingUp size={13} className="text-emerald-400" />
+          <div className="mt-3 pt-2.5 border-t border-slate-200 flex items-center justify-between text-xs">
+            <span className="text-slate-500 flex items-center gap-1">
+              <TrendingUp size={13} className="text-emerald-600" />
               {language === 'hi' ? `उपभोक्ता बचत: ~${estimatedSavingsPct}%` : `Consumer Savings: ~${estimatedSavingsPct}%`}
             </span>
-            <span className="text-emerald-400 font-medium">
+            <span className="text-emerald-700 font-medium">
               {language === 'hi' ? `किसान का शुद्ध लाभ: +${directGainPct}%` : `Farmer Net Gain: +${directGainPct}%`}
             </span>
           </div>
@@ -95,7 +95,7 @@ export const FarmerCard: React.FC<FarmerCardProps> = ({ match, onConnect, onView
       </div>
 
       {/* Action Footer */}
-      <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center gap-3">
+      <div className="mt-5 pt-4 border-t border-slate-200 flex items-center gap-3">
         <Button
           variant="secondary"
           className="flex-1"

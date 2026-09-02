@@ -13,9 +13,9 @@ export const MatchScore: React.FC<MatchScoreProps> = ({ scoreDetails, size = 'fu
   const { overallScore, priceMatch, distanceScore, qualityConfidence, freshnessScore, notes, notesHi } = scoreDetails;
 
   const getScoreColor = (score: number) => {
-    if (score >= 90) return 'text-emerald-400 border-emerald-500 bg-emerald-500/10';
-    if (score >= 75) return 'text-amber-400 border-amber-500 bg-amber-500/10';
-    return 'text-rose-400 border-rose-500 bg-rose-500/10';
+    if (score >= 90) return 'text-emerald-700 border-emerald-200 bg-emerald-50';
+    if (score >= 75) return 'text-amber-700 border-amber-200 bg-amber-50';
+    return 'text-rose-700 border-rose-200 bg-rose-50';
   };
 
   if (size === 'compact') {
@@ -35,17 +35,17 @@ export const MatchScore: React.FC<MatchScoreProps> = ({ scoreDetails, size = 'fu
   ];
 
   return (
-    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center">
             <ShieldCheck size={18} />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-slate-100">
+            <h4 className="text-sm font-semibold text-slate-900">
               {language === 'hi' ? 'एआई मिलान सटीकता' : 'AI Match Confidence'}
             </h4>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               {language === 'hi' ? 'मंडी बनाम सीधा विश्लेषण' : 'Direct vs Middleman Analysis'}
             </p>
           </div>
@@ -61,10 +61,10 @@ export const MatchScore: React.FC<MatchScoreProps> = ({ scoreDetails, size = 'fu
         {criteria.map((item, idx) => (
           <div key={idx} className="space-y-1">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-400">{item.label}</span>
-              <span className="font-semibold text-slate-200">{item.score}%</span>
+              <span className="text-slate-500">{item.label}</span>
+              <span className="font-semibold text-slate-700">{item.score}%</span>
             </div>
-            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
               <div
                 className="bg-gradient-to-r from-emerald-500 to-teal-400 h-1.5 rounded-full transition-all duration-500"
                 style={{ width: `${item.score}%` }}
@@ -75,10 +75,10 @@ export const MatchScore: React.FC<MatchScoreProps> = ({ scoreDetails, size = 'fu
       </div>
 
       {/* Highlights */}
-      <div className="pt-3 border-t border-slate-800 space-y-1.5">
+      <div className="pt-3 border-t border-slate-200 space-y-1.5">
         {(language === 'hi' ? notesHi : notes).map((note, idx) => (
-          <div key={idx} className="flex items-start gap-2 text-xs text-slate-300">
-            <CheckCircle size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+          <div key={idx} className="flex items-start gap-2 text-xs text-slate-600">
+            <CheckCircle size={14} className="text-emerald-600 shrink-0 mt-0.5" />
             <span>{note}</span>
           </div>
         ))}

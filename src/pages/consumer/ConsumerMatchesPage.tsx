@@ -160,19 +160,19 @@ export const ConsumerMatchesPage: React.FC = () => {
           <div>
             <button
               onClick={() => navigate('/consumer/voice')}
-              className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
             >
               <ArrowLeft size={14} />
               <span>{language === 'hi' ? 'वॉयस पर वापस जाएं' : 'Back to Voice Input'}</span>
             </button>
-            <h1 className="text-2xl font-black text-white flex items-center gap-2">
-              <Sprout size={22} className="text-emerald-400" />
+            <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+              <Sprout size={22} className="text-emerald-600" />
               <span>{language === 'hi' ? 'फार्मर्स मार्केट' : 'Farmers Market'}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-200 text-emerald-600 font-semibold">
                 {filteredListings.length} {language === 'hi' ? 'उपलब्ध' : 'Available'}
               </span>
             </h1>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm text-slate-500 mt-1">
               {language === 'hi'
                 ? 'सत्यापित किसानों से सीधे ताज़ा उपज — खोजें या वॉयस से फ़िल्टर करें।'
                 : 'Fresh produce directly from verified farmers — search or use voice to filter.'}
@@ -182,9 +182,9 @@ export const ConsumerMatchesPage: React.FC = () => {
 
         <Card className="bg-amber-500/10 border-amber-500/20 p-4">
           <div className="flex gap-3">
-            <AlertCircle size={18} className="text-amber-400 mt-0.5 shrink-0" />
+            <AlertCircle size={18} className="text-amber-600 mt-0.5 shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-amber-200">
+              <p className="text-sm font-semibold text-amber-700">
                 {language === 'hi' ? 'कोई फ़िल्टर नहीं चुना' : 'No filter applied — showing all produce'}
               </p>
               <p className="text-xs text-amber-300/80 mt-1">
@@ -203,13 +203,13 @@ export const ConsumerMatchesPage: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={language === 'hi' ? 'फसल खोजें... जैसे टमाटर, आलू' : 'Search produce... e.g. Tomatoes, Potatoes'}
-            className="w-full h-11 pl-10 pr-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40"
+            className="w-full h-11 pl-10 pr-3 rounded-xl bg-white border border-slate-200 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40"
           />
         </div>
 
         {filteredListings.length === 0 ? (
-          <Card className="bg-slate-900/60 border-slate-800 p-8 text-center">
-            <p className="text-sm text-slate-400">{language === 'hi' ? 'कोई परिणाम नहीं मिला।' : 'No results found. Try another search.'}</p>
+          <Card className="bg-white border-slate-200 p-8 text-center">
+            <p className="text-sm text-slate-500">{language === 'hi' ? 'कोई परिणाम नहीं मिला।' : 'No results found. Try another search.'}</p>
           </Card>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -217,19 +217,19 @@ export const ConsumerMatchesPage: React.FC = () => {
               const farmer = mockFarmers.find((f) => f.id === listing.farmerId) ?? mockFarmers[0];
               const distanceKm = (farmer as any).distanceKm ?? 75;
               return (
-                <Card key={listing.id} className="flex flex-col justify-between border-slate-700/80 bg-slate-800/90 p-5">
+                <Card key={listing.id} className="flex flex-col justify-between border-slate-200 bg-white p-5">
                   <div>
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <img src={farmer.avatar} alt={farmer.name} className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40" />
                         <div>
-                          <h3 className="font-bold text-slate-100 text-base">{language === 'hi' ? farmer.nameHi : farmer.name}</h3>
-                          <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
+                          <h3 className="font-bold text-slate-900 text-base">{language === 'hi' ? farmer.nameHi : farmer.name}</h3>
+                          <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
                             <span className="flex items-center gap-1">
-                              <MapPin size={12} className="text-emerald-400" />
+                              <MapPin size={12} className="text-emerald-600" />
                               {farmer.village}, {farmer.district} ({distanceKm} km away)
                             </span>
-                            <span className="flex items-center gap-1 text-amber-400 font-semibold">
+                            <span className="flex items-center gap-1 text-amber-600 font-semibold">
                               <Star size={12} className="fill-amber-400" />
                               {farmer.rating}
                             </span>
@@ -239,32 +239,32 @@ export const ConsumerMatchesPage: React.FC = () => {
                       {farmer.fpoMember && <Badge variant="emerald" size="sm">FPO Verified</Badge>}
                     </div>
 
-                    <div className="mt-4 p-3.5 bg-slate-900/80 rounded-xl border border-slate-800/80">
+                    <div className="mt-4 p-3.5 bg-white rounded-xl border border-slate-200/80">
                       <div className="flex items-center justify-between gap-4">
                         <div className="min-w-0">
-                          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             {language === 'hi' ? 'उपलब्ध फसल' : 'Available Produce'}
                           </span>
-                          <p className="text-sm font-bold text-slate-100 mt-0.5 truncate">{language === 'hi' ? listing.nameHi : listing.name}</p>
+                          <p className="text-sm font-bold text-slate-900 mt-0.5 truncate">{language === 'hi' ? listing.nameHi : listing.name}</p>
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <Badge variant="slate" size="sm">{listing.grade}</Badge>
-                            <span className="text-xs text-slate-400 flex items-center gap-1">
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
                               <Package size={12} /> {listing.quantityKg} kg {language === 'hi' ? 'उपलब्ध' : 'available'}
                             </span>
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className="text-xs text-slate-400">{language === 'hi' ? 'सीधा मूल्य' : 'Direct Price'}</span>
+                          <span className="text-xs text-slate-500">{language === 'hi' ? 'सीधा मूल्य' : 'Direct Price'}</span>
                           <div className="flex items-baseline gap-1 justify-end">
-                            <span className="text-lg font-black text-emerald-400">₹{listing.expectedPricePerKg}</span>
-                            <span className="text-xs text-slate-400">/kg</span>
+                            <span className="text-lg font-black text-emerald-600">₹{listing.expectedPricePerKg}</span>
+                            <span className="text-xs text-slate-500">/kg</span>
                           </div>
                           <span className="text-[11px] text-slate-500">{listing.location}</span>
                         </div>
                       </div>
                     </div>
                   </div>
-                  <div className="mt-5 pt-4 border-t border-slate-800/80 flex gap-3">
+                  <div className="mt-5 pt-4 border-t border-slate-200/80 flex gap-3">
                     <Button
                       variant="secondary"
                       className="flex-1"
@@ -333,15 +333,15 @@ export const ConsumerMatchesPage: React.FC = () => {
           <div>
             <button
               onClick={() => navigate('/consumer/voice')}
-              className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
             >
               <ArrowLeft size={14} />
               <span>{language === 'hi' ? 'वॉयस पर वापस जाएं' : 'Back to Voice Input'}</span>
             </button>
-            <h1 className="text-2xl font-black text-white flex items-center gap-2">
-              <Sprout size={22} className="text-emerald-400" />
+            <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+              <Sprout size={22} className="text-emerald-600" />
               <span>{language === 'hi' ? 'फार्मर्स मार्केट' : 'Farmers Market'}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-200 text-emerald-600 font-semibold">
                 {filteredListings.length} {language === 'hi' ? 'उपलब्ध' : 'Available'}
               </span>
             </h1>
@@ -350,9 +350,9 @@ export const ConsumerMatchesPage: React.FC = () => {
 
         <Card className="bg-amber-500/10 border-amber-500/20 p-4">
           <div className="flex gap-3">
-            <AlertCircle size={18} className="text-amber-400 mt-0.5 shrink-0" />
+            <AlertCircle size={18} className="text-amber-600 mt-0.5 shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-amber-200">
+              <p className="text-sm font-semibold text-amber-700">
                 {language === 'hi' ? 'SELLER अनुरोध मिला' : 'SELLER request detected'}
               </p>
               <p className="text-xs text-amber-300/80 mt-1">
@@ -374,7 +374,7 @@ export const ConsumerMatchesPage: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={language === 'hi' ? 'फसल खोजें... जैसे टमाटर, आलू' : 'Search produce... e.g. Tomatoes, Potatoes'}
-            className="w-full h-11 pl-10 pr-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40"
+            className="w-full h-11 pl-10 pr-3 rounded-xl bg-white border border-slate-200 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/40"
           />
         </div>
 
@@ -383,19 +383,19 @@ export const ConsumerMatchesPage: React.FC = () => {
             const farmer = mockFarmers.find((f) => f.id === listing.farmerId) ?? mockFarmers[0];
             const distanceKm = (farmer as any).distanceKm ?? 75;
             return (
-              <Card key={listing.id} className="flex flex-col justify-between border-slate-700/80 bg-slate-800/90 p-5">
+              <Card key={listing.id} className="flex flex-col justify-between border-slate-200 bg-white p-5">
                 <div>
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <img src={farmer.avatar} alt={farmer.name} className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40" />
                       <div>
-                        <h3 className="font-bold text-slate-100 text-base">{language === 'hi' ? farmer.nameHi : farmer.name}</h3>
-                        <div className="flex items-center gap-1 text-xs text-slate-400 mt-1">
+                        <h3 className="font-bold text-slate-900 text-base">{language === 'hi' ? farmer.nameHi : farmer.name}</h3>
+                        <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
                           <span className="flex items-center gap-1">
-                            <MapPin size={12} className="text-emerald-400" />
+                            <MapPin size={12} className="text-emerald-600" />
                             {farmer.village}, {farmer.district}
                           </span>
-                          <span className="flex items-center gap-1 text-amber-400 font-semibold">
+                          <span className="flex items-center gap-1 text-amber-600 font-semibold">
                             <Star size={12} className="fill-amber-400" />
                             {farmer.rating}
                           </span>
@@ -404,20 +404,20 @@ export const ConsumerMatchesPage: React.FC = () => {
                     </div>
                     {farmer.fpoMember && <Badge variant="emerald" size="sm">FPO Verified</Badge>}
                   </div>
-                  <div className="mt-4 p-3.5 bg-slate-900/80 rounded-xl border border-slate-800/80">
+                  <div className="mt-4 p-3.5 bg-white rounded-xl border border-slate-200/80">
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-slate-100 truncate">{language === 'hi' ? listing.nameHi : listing.name}</p>
+                        <p className="text-sm font-bold text-slate-900 truncate">{language === 'hi' ? listing.nameHi : listing.name}</p>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <Badge variant="slate" size="sm">{listing.grade}</Badge>
-                          <span className="text-xs text-slate-400 flex items-center gap-1">
+                          <span className="text-xs text-slate-500 flex items-center gap-1">
                             <Package size={12} /> {listing.quantityKg} kg
                           </span>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="text-lg font-black text-emerald-400">₹{listing.expectedPricePerKg}</span>
-                        <span className="text-xs text-slate-400">/kg</span>
+                        <span className="text-lg font-black text-emerald-600">₹{listing.expectedPricePerKg}</span>
+                        <span className="text-xs text-slate-500">/kg</span>
                         <div className="text-[11px] text-slate-500">{listing.location}</div>
                       </div>
                     </div>
@@ -462,15 +462,15 @@ export const ConsumerMatchesPage: React.FC = () => {
         <div>
           <button
             onClick={() => navigate('/consumer/voice')}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-2 cursor-pointer transition-colors"
           >
             <ArrowLeft size={14} />
             <span>{language === 'hi' ? 'वॉयस पर वापस जाएं' : 'Back to Voice Input'}</span>
           </button>
-          <h1 className="text-2xl font-black text-white flex items-center gap-2 flex-wrap">
+          <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2 flex-wrap">
             <span>{language === 'hi' ? 'आपकी आवश्यकता के लिए सर्वोत्तम किसान' : 'Best Farmers for Your Requirement'}</span>
             {!isLoading && farmerMatchResults.length > 0 && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-200 text-emerald-600 font-semibold">
                 {farmerMatchResults.length} {language === 'hi' ? 'उपलब्ध' : 'Verified Direct Farmers'}
               </span>
             )}
@@ -480,9 +480,9 @@ export const ConsumerMatchesPage: React.FC = () => {
 
       {/* Compact Requirement Summary */}
       {requirementSummary && (
-        <Card className="bg-slate-900/60 border-slate-800 p-4">
-          <h3 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-3 flex items-center gap-2">
-            <Package size={14} className="text-emerald-400" />
+        <Card className="bg-white border-slate-200 p-4">
+          <h3 className="text-xs font-bold tracking-wider text-slate-500 uppercase mb-3 flex items-center gap-2">
+            <Package size={14} className="text-emerald-600" />
             {language === 'hi' ? 'आपकी आवश्यकता' : 'Your Requirement Summary'}
           </h3>
           <div className="flex flex-wrap gap-2">
@@ -519,18 +519,18 @@ export const ConsumerMatchesPage: React.FC = () => {
       {assistantResponse && (
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4">
           <div className="flex items-start gap-3">
-            <Volume2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />
-            <p className="text-sm text-slate-200 leading-relaxed">{assistantResponse}</p>
+            <Volume2 size={18} className="text-emerald-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-slate-800 leading-relaxed">{assistantResponse}</p>
           </div>
         </div>
       )}
 
       {/* Loading */}
       {isLoading && (
-        <Card className="bg-slate-900/60 border-slate-800 p-6 flex items-center gap-3">
-          <Loader2 size={20} className="animate-spin text-emerald-400" />
+        <Card className="bg-white border-slate-200 p-6 flex items-center gap-3">
+          <Loader2 size={20} className="animate-spin text-emerald-600" />
           <div>
-            <p className="text-sm font-semibold text-white">
+            <p className="text-sm font-semibold text-slate-900">
               {language === 'hi' ? 'Suitable farmers dhoondh rahe hain...' : 'Finding suitable farmers...'}
             </p>
             <p className="text-xs text-slate-500">
@@ -545,7 +545,7 @@ export const ConsumerMatchesPage: React.FC = () => {
         <Card className="bg-rose-500/10 border-rose-500/20 p-4">
           <div className="flex gap-2.5">
             <AlertCircle size={16} className="text-rose-400 mt-0.5 shrink-0" />
-            <p className="text-sm text-rose-200">{error}</p>
+            <p className="text-sm text-rose-700">{error}</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => navigate('/consumer/voice')} className="mt-3">
             {language === 'hi' ? 'फिर से कोशिश करें' : 'Try Again'}
@@ -555,16 +555,16 @@ export const ConsumerMatchesPage: React.FC = () => {
 
       {/* No Results */}
       {!isLoading && !error && farmerMatchResults.length === 0 && (
-        <Card className="bg-slate-900/60 border-slate-800 p-8 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
-            <Users size={28} className="text-slate-400" />
+        <Card className="bg-white border-slate-200 p-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center mx-auto mb-4">
+            <Users size={28} className="text-slate-500" />
           </div>
-          <h3 className="text-lg font-bold text-white">
+          <h3 className="text-lg font-bold text-slate-900">
             {language === 'hi'
               ? 'इस आवश्यकता के लिए अभी कोई उपयुक्त किसान नहीं मिला।'
               : 'No suitable farmers found for this requirement.'}
           </h3>
-          <p className="text-sm text-slate-400 mt-2 max-w-md mx-auto">
+          <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto">
             {language === 'hi'
               ? 'Is requirement ke liye abhi suitable farmers nahi mile.'
               : 'Try adjusting product, quantity, or location.'}
@@ -579,9 +579,9 @@ export const ConsumerMatchesPage: React.FC = () => {
       {!isLoading && farmerMatchResults.length > 0 && hasInsufficientSupply && (
         <Card className="bg-amber-500/10 border-amber-500/20 p-4">
           <div className="flex gap-3">
-            <TrendingUp size={18} className="text-amber-400 mt-0.5 shrink-0" />
+            <TrendingUp size={18} className="text-amber-600 mt-0.5 shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-amber-200">
+              <p className="text-sm font-semibold text-amber-700">
                 {language === 'hi'
                   ? 'उपलब्ध आपूर्ति को कई किसानों से मिलाना पड़ सकता है।'
                   : 'Available supply may need to be combined from multiple farmers.'}
@@ -608,7 +608,7 @@ export const ConsumerMatchesPage: React.FC = () => {
             const distanceKm = (farmer as any).distanceKm ?? 75;
 
             return (
-              <Card key={`${farmer.id}-${listing.id}`} className="flex flex-col justify-between border-slate-700/80 bg-slate-800/90 p-5">
+              <Card key={`${farmer.id}-${listing.id}`} className="flex flex-col justify-between border-slate-200 bg-white p-5">
                 <div>
                   {/* Header */}
                   <div className="flex items-start justify-between gap-4">
@@ -620,17 +620,17 @@ export const ConsumerMatchesPage: React.FC = () => {
                       />
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-bold text-slate-100 text-base">
+                          <h3 className="font-bold text-slate-900 text-base">
                             {language === 'hi' ? farmer.nameHi : farmer.name}
                           </h3>
                           {farmer.fpoMember && <Badge variant="emerald" size="sm">FPO Verified</Badge>}
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
+                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 flex-wrap">
                           <span className="flex items-center gap-1">
-                            <MapPin size={12} className="text-emerald-400" />
+                            <MapPin size={12} className="text-emerald-600" />
                             {farmer.village}, {farmer.district} ({distanceKm} km away)
                           </span>
-                          <span className="flex items-center gap-1 text-amber-400 font-semibold">
+                          <span className="flex items-center gap-1 text-amber-600 font-semibold">
                             <Star size={12} className="fill-amber-400" />
                             {farmer.rating} ({farmer.totalDeals} deals)
                           </span>
@@ -641,9 +641,9 @@ export const ConsumerMatchesPage: React.FC = () => {
                       <div
                         className={`px-2.5 py-1 rounded-full border text-xs font-bold ${
                           result.totalScore >= 90
-                            ? 'text-emerald-400 border-emerald-500 bg-emerald-500/10'
+                            ? 'text-emerald-600 border-emerald-500 bg-emerald-500/10'
                             : result.totalScore >= 75
-                              ? 'text-amber-400 border-amber-500 bg-amber-500/10'
+                              ? 'text-amber-600 border-amber-500 bg-amber-500/10'
                               : 'text-rose-400 border-rose-500 bg-rose-500/10'
                         }`}
                       >
@@ -654,29 +654,29 @@ export const ConsumerMatchesPage: React.FC = () => {
                   </div>
 
                   {/* Produce & Offer */}
-                  <div className="mt-4 p-3.5 bg-slate-900/80 rounded-xl border border-slate-800/80">
+                  <div className="mt-4 p-3.5 bg-white rounded-xl border border-slate-200/80">
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
-                        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                           {language === 'hi' ? 'उपलब्ध फसल' : 'Available Produce'}
                         </span>
-                        <p className="text-sm font-bold text-slate-100 mt-0.5 truncate">
+                        <p className="text-sm font-bold text-slate-900 mt-0.5 truncate">
                           {language === 'hi' ? listing.nameHi : listing.name}
                         </p>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <Badge variant="slate" size="sm">
                             {listing.grade}
                           </Badge>
-                          <span className="text-xs text-slate-400 flex items-center gap-1">
+                          <span className="text-xs text-slate-500 flex items-center gap-1">
                             <Package size={12} /> {listing.quantityKg} kg {language === 'hi' ? 'उपलब्ध' : 'available'}
                           </span>
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="text-xs text-slate-400">{language === 'hi' ? 'सीधा मूल्य' : 'Direct Price'}</span>
+                        <span className="text-xs text-slate-500">{language === 'hi' ? 'सीधा मूल्य' : 'Direct Price'}</span>
                         <div className="flex items-baseline gap-1 justify-end">
-                          <span className="text-lg font-black text-emerald-400">₹{listing.expectedPricePerKg}</span>
-                          <span className="text-xs text-slate-400">/kg</span>
+                          <span className="text-lg font-black text-emerald-600">₹{listing.expectedPricePerKg}</span>
+                          <span className="text-xs text-slate-500">/kg</span>
                         </div>
                         <span className="text-[11px] text-slate-500">{listing.location}</span>
                       </div>
@@ -684,23 +684,23 @@ export const ConsumerMatchesPage: React.FC = () => {
                   </div>
 
                   {/* Match Breakdown – display actual breakdown, not calculated */}
-                  <div className="mt-4 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+                  <div className="mt-4 bg-white border border-slate-200 rounded-2xl p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 flex items-center justify-center">
                           <ShieldCheck size={16} />
                         </div>
                         <div>
-                          <h4 className="text-sm font-semibold text-slate-100">
+                          <h4 className="text-sm font-semibold text-slate-900">
                             {language === 'hi' ? 'मैच स्कोर विवरण' : 'Match Score Breakdown'}
                           </h4>
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-slate-500">
                             {language === 'hi' ? 'वास्तविक सेवा परिणाम' : 'From matchFarmers()'}
                           </p>
                         </div>
                       </div>
                       <div className="text-xs text-slate-500">
-                        Total: <span className="font-bold text-white">{result.totalScore}%</span>
+                        Total: <span className="font-bold text-slate-900">{result.totalScore}%</span>
                       </div>
                     </div>
 
@@ -714,13 +714,13 @@ export const ConsumerMatchesPage: React.FC = () => {
                       ].map((item) => (
                         <div key={item.label} className="space-y-1">
                           <div className="flex justify-between text-xs">
-                            <span className="text-slate-400">
+                            <span className="text-slate-500">
                               {language === 'hi' ? item.labelHi : item.label}{' '}
                               <span className="text-slate-500">({item.weight})</span>
                             </span>
-                            <span className="font-semibold text-slate-200">{item.value}%</span>
+                            <span className="font-semibold text-slate-800">{item.value}%</span>
                           </div>
-                          <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                          <div className="w-full bg-white rounded-full h-1.5 overflow-hidden">
                             <div
                               className="bg-gradient-to-r from-emerald-500 to-teal-400 h-1.5 rounded-full transition-all duration-500"
                               style={{ width: `${item.value}%` }}
@@ -730,8 +730,8 @@ export const ConsumerMatchesPage: React.FC = () => {
                       ))}
                     </div>
 
-                    <div className="pt-3 mt-3 border-t border-slate-800">
-                      <p className="text-xs text-slate-300 leading-relaxed italic">“{result.explanation}”</p>
+                    <div className="pt-3 mt-3 border-t border-slate-200">
+                      <p className="text-xs text-slate-600 leading-relaxed italic">“{result.explanation}”</p>
                     </div>
                   </div>
 
@@ -750,7 +750,7 @@ export const ConsumerMatchesPage: React.FC = () => {
                 </div>
 
                 {/* Actions – Step 8 only provides next UI action, no real call */}
-                <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center gap-3">
+                <div className="mt-5 pt-4 border-t border-slate-200/80 flex items-center gap-3">
                   <Button variant="secondary" className="flex-1" onClick={() => handleViewDetails(result)}>
                     {language === 'hi' ? 'विवरण देखें' : 'View Details'}
                   </Button>
@@ -771,15 +771,15 @@ export const ConsumerMatchesPage: React.FC = () => {
         title={language === 'hi' ? 'किसान चयनित' : 'Farmer selected.'}
       >
         <div className="space-y-3">
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-slate-600">
             {language === 'hi'
               ? 'किसान चयनित किया गया। अगला चरण बातचीत/कॉल होगा (Step 9)।'
               : 'Farmer selected. Next step will be direct call / negotiation (Step 9).'}
           </p>
           {selectedFarmer && (
-            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-sm">
-              <p className="font-semibold text-white">{selectedFarmer.farmer.name}</p>
-              <p className="text-xs text-slate-400">
+            <div className="p-3 bg-white rounded-xl border border-slate-200 text-sm">
+              <p className="font-semibold text-slate-900">{selectedFarmer.farmer.name}</p>
+              <p className="text-xs text-slate-500">
                 {selectedFarmer.listing.name} • {selectedFarmer.listing.quantityKg} kg • ₹{selectedFarmer.listing.expectedPricePerKg}/kg
               </p>
             </div>
@@ -804,3 +804,7 @@ export const ConsumerMatchesPage: React.FC = () => {
     </div>
   );
 };
+
+
+
+

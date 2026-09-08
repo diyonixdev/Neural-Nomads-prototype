@@ -292,11 +292,19 @@ const validateAiVoiceIntent = (value: unknown): ParsedVoiceIntent | null => {
 const parseVoiceIntentFallback = (text: string): ParsedVoiceIntent => {
   const normalized = normalizeText(text);
   // SupportHindi: किलो/क्विंटल, english kg/ton, and also "quintal" (100 kg) & katta approximations
-  const quantityMatch =
+  let quantityMatch =
     normalized.match(/(\d+(?:\.\d+)?)\s*(kg|kilo|kilogram|kilograms|किलो|किलोग्राम)\b/) ??
     normalized.match(/(\d+(?:\.\d+)?)\s*(ton|tons|tonne|tonnes|टन)\b/) ??
     normalized.match(/(\d+(?:\.\d+)?)\s*(quintal|qtl|क्विंटल)\b/) ??
     normalized.match(/(\d+(?:\.\d+)?)\s*(katta|bori|bag|boris)\b/);
+    
+  if (!quantityMatch) {
+    const rawNum = normalized.match(/(?<!(?:₹|rs\.?|inr|रु\.?)\s*)\b(\d+(?:\.\d+)?)\b(?!\s*(?:rupees|rs|रुपये|%|₹))/);
+    if (rawNum) {
+      quantityMatch = [rawNum[0], rawNum[1], 'kg'];
+    }
+  }
+
   let priceMatch =
     normalized.match(/(?:₹|rs\.?|inr|रु\.?)\s*(\d+(?:\.\d+)?)/) ??
     normalized.match(/(\d+(?:\.\d+)?)\s*(?:rupees|rs|रुपये)\s*(?:per\s*)?(?:kg|kilo|किलो)/);
@@ -403,13 +411,23 @@ export const parseVoiceIntent = async (text: string): Promise<ParsedVoiceIntent>
     const payload: unknown = await withFetchTimeout(response.json() as Promise<unknown>, 2000, 'voice-intent json');
     console.log('[FRONTEND] voice-intent payload:', payload);
     const parsed = validateAiVoiceIntent(payload);
+    const fallback = parseVoiceIntentFallback(text);
 
     if (!parsed) {
       console.warn('[aiService] Invalid AI intent JSON, using fallback', payload);
-      const fallback = parseVoiceIntentFallback(text);
       console.log('[FRONTEND] voice-intent fallback (invalid JSON):', fallback);
       return fallback;
     }
+    
+    // Merge missing fields from fallback just in case the AI missed them
+    parsed.product = parsed.product ?? fallback.product;
+    parsed.quantity = parsed.quantity ?? fallback.quantity;
+    parsed.unit = parsed.unit ?? fallback.unit;
+    parsed.quality = parsed.quality ?? fallback.quality;
+    parsed.location = parsed.location ?? fallback.location;
+    parsed.date = parsed.date ?? fallback.date;
+    parsed.price = parsed.price ?? fallback.price;
+
     console.log('[FRONTEND] voice-intent parsed successfully:', parsed);
     return parsed;
   } catch (e: any) {
@@ -643,6 +661,49 @@ export const aggregateSupply = (requirement: RequirementInput | BuyerRequirement
     allocations,
     explanation: remainingKg === 0 ? `${fulfilledKg} kg fulfilled through greedy allocation.` : `${fulfilledKg} kg allocated, ${remainingKg} kg still open.`,
   };
+};
+
+export interface DemandForecastResult {
+  product: string;
+  predictedDemandKg: number;
+  forecastPeriod: string;
+  trend: 'Increasing' | 'Stable' | 'Decreasing';
+  recommendation: string;
+  chartData: Array<{ week: string, demand: number }>;
+}
+
+export const aggregateSupplyAsync = async (requirement: RequirementInput | BuyerRequirement | ParsedVoiceIntent): Promise<AggregatedSupplyResult> => {
+  const normalizedRequirement = requirementFromInput(requirement);
+  try {
+    const res = await fetch('/api/aggregate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(normalizedRequirement)
+    });
+    if (!res.ok) throw new Error('API failed');
+    return await res.json();
+  } catch (e) {
+    console.error('aggregateSupplyAsync fallback', e);
+    return aggregateSupply(requirement);
+  }
+};
+
+export const fetchDemandForecast = async (product: string): Promise<DemandForecastResult> => {
+  try {
+    const res = await fetch(`/api/forecast?product=${encodeURIComponent(product)}`);
+    if (!res.ok) throw new Error('API failed');
+    return await res.json();
+  } catch (e) {
+    console.error('fetchDemandForecast error', e);
+    return {
+      product,
+      predictedDemandKg: 500,
+      forecastPeriod: 'Next Month',
+      trend: 'Stable',
+      recommendation: 'Maintain current production/stock.',
+      chartData: []
+    };
+  }
 };
 
 export const suggestNegotiation = (buyerOffer: number, farmerAsk: number): NegotiationResult => {

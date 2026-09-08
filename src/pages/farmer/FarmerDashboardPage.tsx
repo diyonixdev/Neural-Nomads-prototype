@@ -9,7 +9,8 @@ import { farmerInventoryService } from '../../services/farmerInventoryService';
 import { getProduceImage, getPricing, getAvailabilityStatus, FALLBACK_PRODUCE_IMAGE } from '../../services/productService';
 import { FarmerHelpPanel } from '../../components/farmer/FarmerHelpPanel';
 import { mockBuyerRequirements, mockBuyers, mockOrders } from '../../data/mockData';
-import { matchBuyers } from '../../services/aiService';
+import { matchBuyers, fetchDemandForecast } from '../../services/aiService';
+import type { DemandForecastResult } from '../../services/aiService';
 import type { Produce } from '../../types';
 import {
   Tractor,
@@ -25,6 +26,7 @@ import {
   IndianRupee,
   MapPin,
   Calendar,
+  Loader2,
   Edit2,
   Trash2,
   Eye,
@@ -52,6 +54,19 @@ export const FarmerDashboardPage: React.FC = () => {
   const [searchMyProduce, setSearchMyProduce] = useState('');
   const [editingProduce, setEditingProduce] = useState<Produce | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [demandForecast, setDemandForecast] = useState<DemandForecastResult | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (activeTab === 'demand') {
+      const loadForecast = async () => {
+        const result = await fetchDemandForecast('Wheat'); // default crop to fetch
+        if (active) setDemandForecast(result);
+      };
+      loadForecast();
+    }
+    return () => { active = false; };
+  }, [activeTab]);
 
   // Sync tab with URL ?tab=
   useEffect(() => {
@@ -702,56 +717,56 @@ export const FarmerDashboardPage: React.FC = () => {
             </Card>
 
             {/* Demand forecast – derived via aiService aggregation, not hardcoded */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card className="p-5 bg-gradient-to-br from-purple-500/10 via-slate-50 to-slate-50 border-purple-500/20">
-                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                  <Star size={14} className="text-amber-600" /> Top demanded crops (from live buyer requirements)
-                </h4>
-                <div className="mt-4 space-y-2.5">
-                  {(() => {
-                    const counts = mockBuyerRequirements.reduce((acc: Record<string, number>, r) => {
-                      acc[r.produceName] = (acc[r.produceName] || 0) + r.quantityKg;
-                      return acc;
-                    }, {});
-                    const sorted = Object.entries(counts)
-                      .sort((a, b) => b[1] - a[1])
-                      .slice(0, 4);
-                    return sorted.map(([crop, kg]) => (
-                      <div key={crop} className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-200">
-                        <span className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                          <Leaf size={14} className="text-emerald-600" /> {crop}
-                        </span>
-                        <span className="text-xs font-semibold text-slate-600">{kg.toLocaleString()} kg demanded</span>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </Card>
-              <Card className="p-5 bg-white border-slate-200">
-                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                  <Award size={14} className="text-teal-600" /> Price suggestion (via matchBuyers breakdown)
-                </h4>
-                <div className="mt-3 space-y-2.5 text-xs">
-                  {myProduce.slice(0, 3).map((p) => {
-                    const matches = matchBuyers(p);
-                    const top = matches[0];
-                    const suggested = top ? top.requirement.budgetPerKg : p.expectedPricePerKg;
-                    const delta = suggested - p.expectedPricePerKg;
-                    return (
-                      <div key={p.id} className="p-3 rounded-xl bg-white border border-slate-200">
-                        <p className="font-bold text-slate-900">{p.name}</p>
-                        <p className="text-slate-500 mt-1">
-                          You: ₹{p.expectedPricePerKg}/kg • Buyer budget: ₹{suggested}/kg{' '}
-                          <span className={delta >= 0 ? 'text-emerald-400' : 'text-amber-400'}>({delta >= 0 ? `+₹${delta}` : `₹${delta}`} vs your ask)</span>
-                        </p>
-                        <p className="text-[11px] text-slate-500 mt-1">{top?.explanation ?? 'No buyer match yet — check demand insights after adding more lots'}</p>
-                      </div>
-                    );
-                  })}
-                  {myProduce.length === 0 && <p className="text-sm text-slate-500">Add produce to get AI price suggestions</p>}
-                </div>
-              </Card>
-            </div>
+            {demandForecast ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card className="p-5 bg-gradient-to-br from-purple-500/10 via-slate-50 to-slate-50 border-purple-500/20">
+                  <div className="flex justify-between items-start mb-4">
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <TrendingUp size={16} className="text-purple-600" /> AI Demand Forecast: {demandForecast.product}
+                    </h4>
+                    <Badge variant={demandForecast.trend === 'Increasing' ? 'emerald' : demandForecast.trend === 'Decreasing' ? 'amber' : 'slate'} size="sm">
+                      {demandForecast.trend} Trend
+                    </Badge>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <p className="text-3xl font-black text-slate-900">{demandForecast.predictedDemandKg.toLocaleString()} <span className="text-sm text-slate-500 font-normal">kg expected</span></p>
+                    <p className="text-xs text-slate-500 mt-1">Forecast period: {demandForecast.forecastPeriod}</p>
+                  </div>
+                  
+                  <div className="bg-white p-3 rounded-xl border border-slate-200">
+                    <p className="text-xs font-bold text-slate-700 mb-2">Recommendation</p>
+                    <p className="text-sm text-slate-600">{demandForecast.recommendation}</p>
+                  </div>
+                </Card>
+                <Card className="p-5 bg-white border-slate-200">
+                  <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2 mb-4">
+                    <BarChart3 size={14} className="text-teal-600" /> Projected Demand ({demandForecast.forecastPeriod})
+                  </h4>
+                  <div className="flex h-32 items-end gap-2 mt-4">
+                    {demandForecast.chartData.map((d, i) => {
+                      const max = Math.max(...demandForecast.chartData.map(c => c.demand));
+                      const heightPct = Math.max(10, Math.round((d.demand / max) * 100));
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                          <div className="w-full bg-slate-100 rounded-t-md relative flex items-end justify-center h-full overflow-hidden">
+                            <div 
+                              className="w-full bg-purple-500 rounded-t-md transition-all duration-500" 
+                              style={{ height: `${heightPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-slate-500">{d.week}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              </div>
+            ) : (
+               <Card className="p-8 text-center flex items-center justify-center">
+                 <Loader2 size={24} className="animate-spin text-purple-600" />
+               </Card>
+            )}
 
             <Card className="p-4 bg-white/60 border-slate-200">
               <p className="text-[11px] text-slate-500">

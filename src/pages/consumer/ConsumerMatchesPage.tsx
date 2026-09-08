@@ -4,8 +4,8 @@ import { useDemo } from '../../context/DemoContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { matchFarmers } from '../../services/aiService';
-import type { FarmerMatchResult } from '../../services/aiService';
+import { matchFarmers, aggregateSupplyAsync } from '../../services/aiService';
+import type { FarmerMatchResult, AggregatedSupplyResult } from '../../services/aiService';
 import {
   ArrowLeft,
   Volume2,
@@ -31,29 +31,35 @@ export const ConsumerMatchesPage: React.FC = () => {
   const [selectedFarmer, setSelectedFarmer] = useState<FarmerMatchResult | null>(null);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [aggregatedResult, setAggregatedResult] = useState<AggregatedSupplyResult | null>(null);
 
-  // Fallback: if user lands directly on /consumer/matches with a parsedIntent but no results, compute here
-  // This handles refresh or direct navigation – still respects “Find Farmers” explicit intent, but provides resilience
   useEffect(() => {
-    if (parsedIntent && parsedIntent.intent === 'BUYER' && farmerMatchResults.length === 0) {
-      // Only auto-calculate if we have a valid BUYER requirement and no results yet
-      // This is not preloading before click – it’s a recovery for direct navigation
-      setIsLoading(true);
-      setError(null);
-      try {
-        const results = matchFarmers(parsedIntent);
-        setFarmerMatchResults(results);
-      } catch (e) {
-        console.error(e);
-        setError(
-          language === 'hi'
-            ? 'किसान मैचिंग में त्रुटि हुई।'
-            : 'Failed to match farmers. Please try again.'
-        );
-      } finally {
-        setIsLoading(false);
-      }
+    let active = true;
+    if (parsedIntent && parsedIntent.intent === 'BUYER') {
+      const runMatching = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+          if (farmerMatchResults.length === 0) {
+            const results = matchFarmers(parsedIntent);
+            if (active) setFarmerMatchResults(results);
+          }
+          const aggResult = await aggregateSupplyAsync(parsedIntent);
+          if (active) setAggregatedResult(aggResult);
+        } catch (e) {
+          console.error(e);
+          if (active) setError(
+            language === 'hi'
+              ? 'किसान मैचिंग में त्रुटि हुई।'
+              : 'Failed to match farmers. Please try again.'
+          );
+        } finally {
+          if (active) setIsLoading(false);
+        }
+      };
+      runMatching();
     }
+    return () => { active = false; };
   }, [parsedIntent, farmerMatchResults.length, setFarmerMatchResults, language]);
 
   const hasRequirement = !!parsedIntent;
@@ -576,21 +582,48 @@ export const ConsumerMatchesPage: React.FC = () => {
       )}
 
       {/* Insufficient Supply Banner */}
-      {!isLoading && farmerMatchResults.length > 0 && hasInsufficientSupply && (
-        <Card className="bg-amber-500/10 border-amber-500/20 p-4">
+      {/* Aggregation Result */}
+      {!isLoading && farmerMatchResults.length > 0 && hasInsufficientSupply && aggregatedResult && (
+        <Card className="bg-emerald-500/10 border-emerald-500/20 p-5 mb-6">
           <div className="flex gap-3">
-            <TrendingUp size={18} className="text-amber-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-700">
-                {language === 'hi'
-                  ? 'उपलब्ध आपूर्ति को कई किसानों से मिलाना पड़ सकता है।'
-                  : 'Available supply may need to be combined from multiple farmers.'}
+            <TrendingUp size={24} className="text-emerald-600 mt-1 shrink-0" />
+            <div className="w-full">
+              <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
+                <p className="text-lg font-bold text-emerald-800">
+                  {language === 'hi'
+                    ? 'आपूर्ति एकत्रीकरण परिणाम (Supply Aggregation)'
+                    : 'Supply Aggregation Result'}
+                </p>
+                <Badge variant={aggregatedResult.isFulfilled ? 'emerald' : 'amber'} size="md">
+                  {aggregatedResult.isFulfilled ? 'Fully Fulfilled' : 'Partially Fulfilled'}
+                </Badge>
+              </div>
+              <p className="text-sm text-emerald-700 mb-4 font-medium">
+                {aggregatedResult.explanation}
               </p>
-              <p className="text-xs text-amber-300/80 mt-1">
-                {language === 'hi'
-                  ? 'कोई एक किसान पूरी मात्रा नहीं दे सकता — Step 10 में aggregateSupply() इसे संभालेगा।'
-                  : 'No single farmer can satisfy the full quantity — Step 10 will handle aggregation.'}
-              </p>
+
+              <div className="space-y-3">
+                {aggregatedResult.allocations.map((alloc, idx) => (
+                  <div key={idx} className="bg-white p-3 rounded-xl border border-emerald-500/30 flex justify-between items-center flex-wrap gap-4">
+                    <div className="flex items-center gap-3">
+                      <img src={alloc.farmer.avatar} alt={alloc.farmer.name} className="w-10 h-10 rounded-full object-cover" />
+                      <div>
+                        <p className="font-bold text-sm text-slate-900">{alloc.farmer.name}</p>
+                        <p className="text-xs text-slate-500">{alloc.farmer.village}, {alloc.farmer.district}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-emerald-600">{alloc.allocatedKg} kg</p>
+                      <p className="text-xs text-slate-500">@ ₹{alloc.listing.expectedPricePerKg}/kg</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end">
+                <Button variant="primary" size="sm" onClick={() => navigate('/consumer/order')}>
+                  {language === 'hi' ? 'थोक ऑर्डर दें' : 'Place Bulk Order'}
+                </Button>
+              </div>
             </div>
           </div>
         </Card>

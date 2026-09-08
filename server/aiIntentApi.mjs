@@ -480,6 +480,105 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
     }
   }
 
+  // POST /api/aggregate — supply aggregation for bulk orders
+  if (method === 'POST' && pathname === '/api/aggregate') {
+    try {
+      const body = await readBody(request);
+      const reqData = JSON.parse(body);
+      const product = (reqData.product || '').toLowerCase();
+      const quantityKg = Number(reqData.quantityKg) || 0;
+      if (!product || quantityKg <= 0) {
+        sendJson(response, 400, { error: 'product and positive quantityKg required' }, request);
+        return;
+      }
+      const allProduce = getAllProduce();
+      // Filter matches
+      const matches = allProduce.filter(p => p.name.toLowerCase().includes(product) || p.category.toLowerCase().includes(product));
+      // Sort by best match (e.g., quantity descending)
+      matches.sort((a, b) => b.quantityKg - a.quantityKg);
+
+      let remainingKg = quantityKg;
+      const allocations = [];
+      for (const listing of matches) {
+        if (remainingKg <= 0) break;
+        if (listing.quantityKg <= 0) continue;
+        const allocatedKg = Math.min(remainingKg, listing.quantityKg);
+        const farmer = serverMockFarmers.find(f => f.id === listing.farmerId) || serverMockFarmers[0];
+        allocations.push({
+          farmer,
+          listing,
+          allocatedKg
+        });
+        remainingKg -= allocatedKg;
+      }
+      
+      const fulfilledKg = quantityKg - remainingKg;
+      const isFulfilled = remainingKg === 0;
+      const explanation = isFulfilled ? `${fulfilledKg} kg fulfilled through aggregation.` : `${fulfilledKg} kg allocated, ${remainingKg} kg still open.`;
+      
+      sendJson(response, 200, {
+        requestedKg: quantityKg,
+        fulfilledKg,
+        remainingKg,
+        isFulfilled,
+        allocations,
+        explanation
+      }, request);
+      return;
+    } catch (e) {
+      sendJson(response, 400, { error: 'Invalid body' }, request);
+      return;
+    }
+  }
+
+  // GET /api/forecast — demand forecasting
+  if (method === 'GET' && pathname === '/api/forecast') {
+    const productQ = urlObj.searchParams.get('product') || 'Wheat';
+    const product = productQ.toLowerCase();
+    
+    // Use mockBuyerRequirements to aggregate demand
+    const allDemands = serverMockBuyerRequirements;
+    const productDemands = allDemands.filter(r => r.produceName.toLowerCase().includes(product));
+    
+    const baseDemand = productDemands.reduce((sum, r) => sum + r.quantityKg, 0) || 500;
+    
+    // Generate trend
+    const trends = ['Increasing', 'Stable', 'Decreasing'];
+    let trend = trends[1];
+    let recommendation = 'Maintain current production/stock.';
+    
+    if (baseDemand > 2000) {
+      trend = 'Increasing';
+      recommendation = 'Consider increasing availability. High market demand detected.';
+    } else if (baseDemand < 1000 && baseDemand > 0) {
+      trend = 'Decreasing';
+      recommendation = 'Avoid excessive stock. Demand is lower than usual.';
+    }
+    
+    // Generate a simple chart data for next 4 weeks
+    const chartData = [
+      { week: 'Week 1', demand: Math.round(baseDemand * 0.8) },
+      { week: 'Week 2', demand: Math.round(baseDemand * 0.9) },
+      { week: 'Week 3', demand: Math.round(baseDemand * 1.1) },
+      { week: 'Week 4', demand: Math.round(baseDemand * 1.25) },
+    ];
+    
+    if (trend === 'Decreasing') {
+      chartData[2].demand = Math.round(baseDemand * 0.85);
+      chartData[3].demand = Math.round(baseDemand * 0.7);
+    }
+    
+    sendJson(response, 200, {
+      product: productQ,
+      predictedDemandKg: Math.round(baseDemand * 1.1),
+      forecastPeriod: 'Next Month',
+      trend,
+      recommendation,
+      chartData
+    }, request);
+    return;
+  }
+
   const isVoiceIntent = method === 'POST' && pathname === '/api/voice-intent';
   const isAssistantResponse = method === 'POST' && pathname === '/api/assistant-response';
 

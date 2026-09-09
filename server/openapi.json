@@ -1,0 +1,398 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "FarmDirect API",
+    "description": "FarmDirect agricultural marketplace API for listing and managing farm produce.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8787",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Returns server health status.",
+        "operationId": "getHealth",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "summary": "Health check (API prefix)",
+        "description": "Returns server health status (alternative path).",
+        "operationId": "getApiHealth",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/listings": {
+      "post": {
+        "summary": "Create a new listing",
+        "description": "Creates a new farm produce listing in Firestore.",
+        "operationId": "createListing",
+        "tags": ["Listings"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateListingRequest"
+              },
+              "example": {
+                "farmer_name": "Raj Kumar",
+                "phone": "+919876543210",
+                "product": "Wheat",
+                "quantity": 10,
+                "unit": "kg",
+                "asking_price": 30,
+                "price_unit": "kg",
+                "location": "Ghaziabad",
+                "quality": "Good",
+                "intent": "sell",
+                "source": "voice_agent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Listing created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateListingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or malformed JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server or Firestore error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/listings/{listing_id}": {
+      "get": {
+        "summary": "Get a listing by ID",
+        "description": "Retrieves a single listing from Firestore by its listing_id.",
+        "operationId": "getListingById",
+        "tags": ["Listings"],
+        "parameters": [
+          {
+            "name": "listing_id",
+            "in": "path",
+            "required": true,
+            "description": "The unique listing identifier",
+            "schema": {
+              "type": "string"
+            },
+            "example": "ls-mtslgjw1-wm0z9q"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listing found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetListingResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Listing not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server or Firestore error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "service": {
+            "type": "string",
+            "example": "FarmDirect API"
+          },
+          "port": {
+            "type": "integer",
+            "example": 8787
+          },
+          "hasApiKey": {
+            "type": "boolean",
+            "example": true
+          },
+          "model": {
+            "type": "string",
+            "example": "openai/gpt-4o-mini"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateListingRequest": {
+        "type": "object",
+        "required": [
+          "farmer_name",
+          "phone",
+          "product",
+          "quantity",
+          "unit",
+          "asking_price",
+          "price_unit",
+          "location"
+        ],
+        "properties": {
+          "farmer_name": {
+            "type": "string",
+            "description": "Name of the farmer",
+            "example": "Raj Kumar"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Farmer phone number",
+            "example": "+919876543210"
+          },
+          "product": {
+            "type": "string",
+            "description": "Produce name",
+            "example": "Wheat"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "Quantity available (must be positive)",
+            "example": 10,
+            "exclusiveMinimum": 0
+          },
+          "unit": {
+            "type": "string",
+            "description": "Unit of measurement",
+            "enum": ["kg", "tonnes", "quintal"],
+            "example": "kg"
+          },
+          "asking_price": {
+            "type": "number",
+            "description": "Price per unit (non-negative)",
+            "example": 30,
+            "minimum": 0
+          },
+          "price_unit": {
+            "type": "string",
+            "description": "Price unit basis",
+            "example": "kg"
+          },
+          "location": {
+            "type": "string",
+            "description": "Location (city or area)",
+            "example": "Ghaziabad"
+          },
+          "quality": {
+            "type": "string",
+            "description": "Quality grade (optional)",
+            "example": "Good"
+          },
+          "intent": {
+            "type": "string",
+            "description": "Listing intent",
+            "enum": ["sell", "buy"],
+            "default": "sell",
+            "example": "sell"
+          },
+          "source": {
+            "type": "string",
+            "description": "Source of the listing",
+            "enum": ["voice_agent", "manual", "web", "api"],
+            "default": "voice_agent",
+            "example": "voice_agent"
+          }
+        }
+      },
+      "Listing": {
+        "type": "object",
+        "properties": {
+          "listing_id": {
+            "type": "string",
+            "description": "Unique listing identifier",
+            "example": "ls-mtslgjw1-wm0z9q"
+          },
+          "farmer_name": {
+            "type": "string",
+            "example": "Raj Kumar"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+919876543210"
+          },
+          "product": {
+            "type": "string",
+            "example": "Wheat"
+          },
+          "quantity": {
+            "type": "number",
+            "example": 10
+          },
+          "unit": {
+            "type": "string",
+            "enum": ["kg", "tonnes", "quintal"],
+            "example": "kg"
+          },
+          "asking_price": {
+            "type": "number",
+            "example": 30
+          },
+          "price_unit": {
+            "type": "string",
+            "example": "kg"
+          },
+          "location": {
+            "type": "string",
+            "example": "Ghaziabad"
+          },
+          "quality": {
+            "type": "string",
+            "nullable": true,
+            "example": "Good"
+          },
+          "intent": {
+            "type": "string",
+            "enum": ["sell", "buy"],
+            "example": "sell"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["voice_agent", "manual", "web", "api"],
+            "example": "voice_agent"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["created", "active", "sold", "cancelled"],
+            "example": "created"
+          },
+          "created_at": {
+            "type": "object",
+            "description": "Firestore timestamp",
+            "example": { "_seconds": 1788867394, "_nanoseconds": 993000000 }
+          }
+        }
+      },
+      "CreateListingResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "listing_id": {
+            "type": "string",
+            "example": "ls-mtslgjw1-wm0z9q"
+          },
+          "status": {
+            "type": "string",
+            "example": "created"
+          },
+          "listing": {
+            "$ref": "#/components/schemas/Listing"
+          }
+        }
+      },
+      "GetListingResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "listing_id": {
+            "type": "string",
+            "example": "ls-mtslgjw1-wm0z9q"
+          },
+          "listing": {
+            "$ref": "#/components/schemas/Listing"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "string",
+            "example": "Validation failed: ..."
+          }
+        }
+      }
+    }
+  }
+}

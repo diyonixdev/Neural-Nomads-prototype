@@ -4,7 +4,7 @@ import { useDemo } from '../../context/DemoContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { matchFarmers, aggregateSupplyAsync } from '../../services/aiService';
+import { matchFarmers, aggregateSupplyAsync, placeBulkOrderAsync } from '../../services/aiService';
 import type { FarmerMatchResult, AggregatedSupplyResult } from '../../services/aiService';
 import {
   ArrowLeft,
@@ -32,6 +32,21 @@ export const ConsumerMatchesPage: React.FC = () => {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [aggregatedResult, setAggregatedResult] = useState<AggregatedSupplyResult | null>(null);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+
+  const handlePlaceBulkOrder = async () => {
+    if (!aggregatedResult) return;
+    setIsPlacingOrder(true);
+    try {
+      await placeBulkOrderAsync(aggregatedResult.allocations);
+      alert(language === 'hi' ? 'ऑर्डर सफलतापूर्वक दिया गया' : 'Order placed successfully');
+      navigate('/consumer/order');
+    } catch (err: any) {
+      alert(err.message || 'Order placement failed');
+    } finally {
+      setIsPlacingOrder(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -620,7 +635,8 @@ export const ConsumerMatchesPage: React.FC = () => {
                 ))}
               </div>
               <div className="mt-4 flex justify-end">
-                <Button variant="primary" size="sm" onClick={() => navigate('/consumer/order')}>
+                <Button variant="primary" size="sm" onClick={handlePlaceBulkOrder} disabled={isPlacingOrder}>
+                  {isPlacingOrder ? <Loader2 size={16} className="animate-spin" /> : null}
                   {language === 'hi' ? 'थोक ऑर्डर दें' : 'Place Bulk Order'}
                 </Button>
               </div>

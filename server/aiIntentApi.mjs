@@ -125,6 +125,7 @@ const responseUserPrompt = (requirement, context) => {
 // ==================== Marketplace / Inventory Backend (reuses same server, no duplicate service) ====================
 const DATA_DIR = path.resolve(__dirnameEnv, 'data');
 const PRODUCE_STORE_PATH = path.join(DATA_DIR, 'produce-store.json');
+const ORDERS_STORE_PATH = path.join(DATA_DIR, 'orders-store.json');
 const ensureDataDir = () => {
   try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 };
@@ -190,6 +191,24 @@ const saveStoredProduce = (arr) => {
     fs.writeFileSync(PRODUCE_STORE_PATH, JSON.stringify(arr, null, 2), 'utf8');
   } catch (e) { console.error('[produce-store] save failed', e); }
 };
+
+const loadStoredOrders = () => {
+  try {
+    if (fs.existsSync(ORDERS_STORE_PATH)) {
+      const raw = fs.readFileSync(ORDERS_STORE_PATH, 'utf8');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr;
+    }
+  } catch {}
+  return [];
+};
+const saveStoredOrders = (arr) => {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(ORDERS_STORE_PATH, JSON.stringify(arr, null, 2), 'utf8');
+  } catch (e) { console.error('[orders-store] save failed', e); }
+};
+
 let extraProduce = loadStoredProduce();
 const getAllProduce = () => {
   const map = new Map();
@@ -1224,7 +1243,66 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
   }
   // GET /api/orders
   if (method === 'GET' && pathname === '/api/orders') {
-    sendJson(response, 200, [], request);
+    sendJson(response, 200, loadStoredOrders(), request);
+    return;
+  }
+  
+  // POST /api/orders
+  if (method === 'POST' && pathname === '/api/orders') {
+    try {
+      const body = await readBody(request);
+      const reqData = JSON.parse(body);
+      const allocations = reqData.allocations || [];
+      if (!allocations.length) {
+        sendJson(response, 400, { error: 'No allocations provided' }, request);
+        return;
+      }
+
+      let totalAmount = 0;
+      let totalKg = 0;
+      let produceUpdated = false;
+
+      // Deduct quantity from produce store
+      for (const alloc of allocations) {
+        const pId = alloc.listing.id;
+        const p = extraProduce.find(ep => ep.id === pId);
+        if (p) {
+          if (p.quantityKg < alloc.allocatedKg) {
+            sendJson(response, 400, { error: `Insufficient stock for ${p.name}` }, request);
+            return;
+          }
+          p.quantityKg -= alloc.allocatedKg;
+          produceUpdated = true;
+        } else {
+          // It might be a mock produce, just ignore deducting if it's not in extraProduce
+        }
+        totalKg += alloc.allocatedKg;
+        totalAmount += alloc.allocatedKg * alloc.listing.expectedPricePerKg;
+      }
+
+      if (produceUpdated) {
+        saveStoredProduce(extraProduce);
+      }
+
+      const newOrder = {
+        id: `ord-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+        buyerId: reqData.buyerId || 'b-unknown',
+        allocations,
+        totalQuantityKg: totalKg,
+        totalAmount,
+        status: 'confirmed',
+        createdAt: new Date().toISOString()
+      };
+
+      const orders = loadStoredOrders();
+      orders.push(newOrder);
+      saveStoredOrders(orders);
+
+      sendJson(response, 200, { success: true, order: newOrder }, request);
+    } catch (e) {
+      console.error(e);
+      sendJson(response, 400, { error: 'Invalid body' }, request);
+    }
     return;
   }
   // POST /api/marketplace/search — unified buyer search (uses real marketplace data, not fictional)
@@ -1371,17 +1449,30 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
     const productQ = urlObj.searchParams.get('product') || 'Wheat';
     const product = productQ.toLowerCase();
     
-    // Use mockBuyerRequirements to aggregate demand
-    const allDemands = serverMockBuyerRequirements;
-    const productDemands = allDemands.filter(r => r.produceName.toLowerCase().includes(product));
+    // Read historical orders
+    const orders = loadStoredOrders();
     
-    const baseDemand = productDemands.reduce((sum, r) => sum + r.quantityKg, 0) || 500;
+    // Filter orders for the specific product
+    let productOrders = orders.filter(o => o.allocations && o.allocations.some(a => a.listing.name.toLowerCase().includes(product) || a.listing.category.toLowerCase().includes(product)));
     
-    // Generate trend
+    // Fallback to mock requirements if very few orders exist
+    let baseDemand = 0;
+    if (productOrders.length < 3) {
+      const allDemands = serverMockBuyerRequirements;
+      const productDemands = allDemands.filter(r => r.produceName.toLowerCase().includes(product));
+      baseDemand = productDemands.reduce((sum, r) => sum + r.quantityKg, 0) || 500;
+    } else {
+      baseDemand = productOrders.reduce((sum, o) => {
+        return sum + o.allocations.filter(a => a.listing.name.toLowerCase().includes(product) || a.listing.category.toLowerCase().includes(product)).reduce((s, a) => s + a.allocatedKg, 0);
+      }, 0) / productOrders.length * 4; // average weekly demand * 4 to get monthly
+    }
+    
+    // Generate trend based on simple threshold logic
     const trends = ['Increasing', 'Stable', 'Decreasing'];
     let trend = trends[1];
     let recommendation = 'Maintain current production/stock.';
     
+    // Example statistical heuristic
     if (baseDemand > 2000) {
       trend = 'Increasing';
       recommendation = 'Consider increasing availability. High market demand detected.';
@@ -1401,6 +1492,9 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
     if (trend === 'Decreasing') {
       chartData[2].demand = Math.round(baseDemand * 0.85);
       chartData[3].demand = Math.round(baseDemand * 0.7);
+    } else if (trend === 'Stable') {
+      chartData[2].demand = Math.round(baseDemand * 0.95);
+      chartData[3].demand = Math.round(baseDemand * 1.05);
     }
     
     sendJson(response, 200, {

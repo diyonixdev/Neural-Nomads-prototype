@@ -55,18 +55,19 @@ export const FarmerDashboardPage: React.FC = () => {
   const [editingProduce, setEditingProduce] = useState<Produce | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [demandForecast, setDemandForecast] = useState<DemandForecastResult | null>(null);
+  const [forecastProduct, setForecastProduct] = useState('Wheat');
 
   useEffect(() => {
     let active = true;
     if (activeTab === 'demand') {
       const loadForecast = async () => {
-        const result = await fetchDemandForecast('Wheat'); // default crop to fetch
+        const result = await fetchDemandForecast(forecastProduct);
         if (active) setDemandForecast(result);
       };
       loadForecast();
     }
     return () => { active = false; };
-  }, [activeTab]);
+  }, [activeTab, forecastProduct]);
 
   // Sync tab with URL ?tab=
   useEffect(() => {
@@ -674,7 +675,19 @@ export const FarmerDashboardPage: React.FC = () => {
                 <BarChart3 size={16} className="text-purple-400" /> {language === 'hi' ? 'मांग अंतर्दृष्टि' : 'Demand Insights'}
                 <Badge variant="purple" size="sm">AI • matchBuyers()</Badge>
               </h3>
-              <span className="text-[11px] text-slate-500 hidden sm:inline">Powered by existing aiService • no fake AI</span>
+              <div className="flex items-center gap-2">
+                <select 
+                  value={forecastProduct} 
+                  onChange={(e) => setForecastProduct(e.target.value)}
+                  className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none text-slate-700"
+                >
+                  <option value="Wheat">Wheat</option>
+                  <option value="Tomato">Tomato</option>
+                  <option value="Potato">Potato</option>
+                  <option value="Onion">Onion</option>
+                </select>
+                <span className="text-[11px] text-slate-500 hidden sm:inline">Powered by existing aiService</span>
+              </div>
             </div>
 
             {/* Buyer Demand section */}

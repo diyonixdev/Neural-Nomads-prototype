@@ -22,6 +22,7 @@ import { Card } from '../ui/Card';
 import { createVoiceAgent, buildFinalListing } from '../../services/voiceAgentCore';
 import type { ProcessTurnResult, SubmitListingResult, FinalListing } from '../../services/voiceAgentCore';
 import type { ListingData } from '../../services/conversationManager';
+import { parseVoiceIntent } from '../../services/aiService';
 import type { ParsedVoiceIntent } from '../../services/aiService';
 
 // Transport-agnostic core — no browser APIs, no UI logic.
@@ -340,6 +341,20 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
 
       try {
         setPhase('understanding');
+
+        if (mode === 'consumer') {
+          const result = await parseVoiceIntent(trimmed);
+          console.log('[FRONTEND] parsed consumer intent:', result);
+          setLastSpokenText(trimmed);
+          if (onParsedResult) {
+            onParsedResult(result, trimmed);
+          }
+          if (onProceed) {
+            onProceed();
+          }
+          setPhase('idle');
+          return;
+        }
 
         const result = await voiceAgent.processTurn(sessionIdRef.current, trimmed);
         console.log('[FRONTEND] conversation result:', result);

@@ -862,6 +862,19 @@ export const fetchDemandForecast = async (product: string): Promise<DemandForeca
   }
 };
 
+export const placeBulkOrderAsync = async (allocations: SupplyAllocation[], buyerId: string = 'b-unknown'): Promise<any> => {
+  const res = await fetch('/api/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ allocations, buyerId })
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.error || 'Order placement failed');
+  }
+  return res.json();
+};
+
 export const suggestNegotiation = (buyerOffer: number, farmerAsk: number): NegotiationResult => {
   const gap = farmerAsk - buyerOffer;
   const suggestedPricePerKg = Math.round((buyerOffer + gap * 0.67) * 100) / 100;

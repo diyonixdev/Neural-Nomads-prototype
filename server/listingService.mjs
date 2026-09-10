@@ -1,0 +1,129 @@
+import { db } from './firebase.mjs';
+import { Timestamp } from 'firebase-admin/firestore';
+
+const COLLECTION_NAME = 'listings';
+
+const VALID_UNITS = ['kg', 'tonnes', 'quintal'];
+const VALID_INTENTS = ['sell', 'buy'];
+const VALID_STATUSES = ['created', 'active', 'sold', 'cancelled'];
+const VALID_SOURCES = ['voice_agent', 'manual', 'web', 'api'];
+
+function generateListingId() {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `ls-${ts}-${rand}`;
+}
+
+function validateListing(data) {
+  const errors = [];
+
+  if (!data.farmer_name || typeof data.farmer_name !== 'string' || data.farmer_name.trim().length === 0) {
+    errors.push('farmer_name is required and must be a non-empty string');
+  }
+
+  if (!data.phone || typeof data.phone !== 'string' || data.phone.trim().length === 0) {
+    errors.push('phone is required and must be a non-empty string');
+  }
+
+  if (!data.product || typeof data.product !== 'string' || data.product.trim().length === 0) {
+    errors.push('product is required and must be a non-empty string');
+  }
+
+  if (data.quantity == null || typeof data.quantity !== 'number' || data.quantity <= 0) {
+    errors.push('quantity is required and must be a positive number');
+  }
+
+  if (!data.unit || !VALID_UNITS.includes(data.unit)) {
+    errors.push(`unit is required and must be one of: ${VALID_UNITS.join(', ')}`);
+  }
+
+  if (data.asking_price == null || typeof data.asking_price !== 'number' || data.asking_price < 0) {
+    errors.push('asking_price is required and must be a non-negative number');
+  }
+
+  if (!data.price_unit || typeof data.price_unit !== 'string') {
+    errors.push('price_unit is required (e.g., "kg", "quintal")');
+  }
+
+  if (!data.location || typeof data.location !== 'string' || data.location.trim().length === 0) {
+    errors.push('location is required and must be a non-empty string');
+  }
+
+  if (data.intent && !VALID_INTENTS.includes(data.intent)) {
+    errors.push(`intent must be one of: ${VALID_INTENTS.join(', ')}`);
+  }
+
+  if (data.source && !VALID_SOURCES.includes(data.source)) {
+    errors.push(`source must be one of: ${VALID_SOURCES.join(', ')}`);
+  }
+
+  if (data.status && !VALID_STATUSES.includes(data.status)) {
+    errors.push(`status must be one of: ${VALID_STATUSES.join(', ')}`);
+  }
+
+  return errors;
+}
+
+function buildListingDoc(data) {
+  return {
+    listing_id: data.listing_id || generateListingId(),
+    farmer_name: String(data.farmer_name).trim(),
+    phone: String(data.phone).trim(),
+    product: String(data.product).trim(),
+    quantity: Number(data.quantity),
+    unit: String(data.unit).trim(),
+    asking_price: Number(data.asking_price),
+    price_unit: String(data.price_unit).trim(),
+    location: String(data.location).trim(),
+    quality: data.quality ? String(data.quality).trim() : null,
+    intent: data.intent || 'sell',
+    source: data.source || 'voice_agent',
+    status: data.status || 'created',
+    created_at: Timestamp.now(),
+  };
+}
+
+async function createListing(data) {
+  if (!db) {
+    throw new Error('Firestore is not initialized. Check FIREBASE_SERVICE_ACCOUNT_PATH.');
+  }
+
+  const validationErrors = validateListing(data);
+  if (validationErrors.length > 0) {
+    throw new Error(`Validation failed: ${validationErrors.join('; ')}`);
+  }
+
+  const listingDoc = buildListingDoc(data);
+  const docRef = db.collection(COLLECTION_NAME).doc(listingDoc.listing_id);
+  await docRef.set(listingDoc);
+
+  return listingDoc;
+}
+
+async function getListingById(listingId) {
+  if (!db) {
+    throw new Error('Firestore is not initialized. Check FIREBASE_SERVICE_ACCOUNT_PATH.');
+  }
+
+  if (!listingId || typeof listingId !== 'string') {
+    throw new Error('listingId must be a non-empty string');
+  }
+
+  const docRef = db.collection(COLLECTION_NAME).doc(listingId);
+  const snap = await docRef.get();
+
+  if (!snap.exists) {
+    return null;
+  }
+
+  return snap.data();
+}
+
+export {
+  COLLECTION_NAME,
+  generateListingId,
+  validateListing,
+  buildListingDoc,
+  createListing,
+  getListingById,
+};

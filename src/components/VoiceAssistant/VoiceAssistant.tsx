@@ -12,12 +12,20 @@ import {
   Store,
   CheckCircle2,
   Keyboard,
+  XCircle,
+  ClipboardList,
 } from 'lucide-react';
 import { useDemo } from '../../context/DemoContext';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { createVoiceAgent, buildFinalListing } from '../../services/voiceAgentCore';
+import type { ProcessTurnResult, SubmitListingResult, FinalListing } from '../../services/voiceAgentCore';
+import type { ListingData } from '../../services/conversationManager';
 import type { ParsedVoiceIntent } from '../../services/aiService';
+
+// Transport-agnostic core — no browser APIs, no UI logic.
+const voiceAgent = createVoiceAgent();
 
 interface VoiceAssistantProps {
   mode: 'consumer' | 'farmer';
@@ -43,7 +51,9 @@ const detectResponseLanguage = (text: string): 'hi' | 'en' => {
   const hasDevanagari = /[\u0900-\u097F]/.test(text);
   if (hasDevanagari) return 'hi';
   const lower = text.toLowerCase();
-  if (/(mujhe|chahiye|paas|dhoondho|kal|tamatar|aloo|pyaaz|hai\b)/.test(lower)) return 'hi';
+  if (/(ji\b|aap\b|haan|nahi|theek|rupaye|chahte|chahenge|kitne|kitna|naam|bataiye|kahan|kilo hai|bechna|ho gaya|ek baar)/.test(lower)) {
+    return 'hi';
+  }
   return 'en';
 };
 
@@ -65,25 +75,38 @@ const getPreferredVoice = (lang: 'hi' | 'en'): SpeechSynthesisVoice | null => {
 
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedResult, onProceed }) => {
   const { language, setParsedIntent, setAssistantResponse, setLastSpokenText } = useDemo();
-  // Keep onProceed for backward compat (parent pages still pass it), but new flow is auto — no extra click needed
   void onProceed;
 
   const [phase, setPhase] = useState<AssistantPhase>('idle');
   const [transcript, setTranscript] = useState('');
   const [interim, setInterim] = useState('');
   const [typedInput, setTypedInput] = useState('');
-  const [parsed, setParsed] = useState<ParsedVoiceIntent | null>(null);
   const [response, setResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [resultSummary, setResultSummary] = useState<string | null>(null);
 
+  const [convResult, setConvResult] = useState<ProcessTurnResult | null>(null);
+  const [convState, setConvState] = useState<ProcessTurnResult['state']>('IDLE');
+  const [finalListing, setFinalListing] = useState<FinalListing | null>(null);
+  const [listingId, setListingId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string>(() => voiceAgent.createSession());
+  const [submitting, setSubmitting] = useState(false);
+
   const recognitionRef = useRef<any>(null);
   const finalTranscriptRef = useRef<string>('');
   const interimRef = useRef<string>('');
   const silenceTimeoutRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
+  const sessionIdRef = useRef<string>(sessionId);
+  // Mirrors of isSpeaking/phase so recognition callbacks (created once per
+  // listening session) can check the CURRENT values synchronously.
+  const isSpeakingRef = useRef(false);
+  const phaseRef = useRef<AssistantPhase>('idle');
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   const getEffectiveSTTLang = useCallback((): string => {
     return language === 'hi' ? 'hi-IN' : 'en-IN';
@@ -99,14 +122,35 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   const stopSpeaking = useCallback(() => {
     if (hasSpeechSynthesis()) {
       window.speechSynthesis.cancel();
+      isSpeakingRef.current = false; // sync mirror immediately for mic guards
       setIsSpeaking(false);
     }
   }, []);
+
+  // Hard-stop the microphone while the assistant talks. Speech recognition
+  // must capture ONLY the farmer; the assistant's own TTS output must never be
+  // transcribed and fed back into the parser.
+  const suppressRecognition = useCallback(() => {
+    clearSilenceTimeout();
+    const rec = recognitionRef.current;
+    if (rec) {
+      try {
+        rec.onresult = null;
+        rec.onend = null;
+        rec.onerror = null;
+        rec.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    setInterim('');
+    interimRef.current = '';
+  }, [clearSilenceTimeout]);
 
   const speak = useCallback(
     (text: string) => {
       if (!hasSpeechSynthesis() || !text) return;
       try {
+        suppressRecognition();
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         const langHint = detectResponseLanguage(text);
@@ -148,7 +192,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setPhase('idle');
       }
     },
-    []
+    [suppressRecognition]
   );
 
   const resetForNext = useCallback(() => {
@@ -158,26 +202,114 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     setInterim('');
     finalTranscriptRef.current = '';
     interimRef.current = '';
-    setParsed(null);
+    setConvResult(null);
+    setConvState('IDLE');
+    setFinalListing(null);
+    setListingId(null);
     setResponse(null);
     setError(null);
     setErrorCode(null);
     setResultSummary(null);
+    setSubmitting(false);
     setPhase('idle');
     setIsSpeaking(false);
     isProcessingRef.current = false;
   }, [clearSilenceTimeout]);
 
-  const handleError = useCallback((code: string, message: string) => {
+  const handleResetSession = useCallback(() => {
+    voiceAgent.resetSession(sessionIdRef.current);
+    const newSid = voiceAgent.createSession();
+    setSessionId(newSid);
+    sessionIdRef.current = newSid;
+    resetForNext();
+  }, [resetForNext]);
+
+  const handleError = useCallback((code: string, message: string, detail?: string) => {
+    if (detail) console.error(`[VoiceAssistant] ${code}:`, detail);
+    else console.error(`[VoiceAssistant] ${code}:`, message);
     setError(message);
     setErrorCode(code);
     setPhase('error');
+    setConvState('ERROR');
     isProcessingRef.current = false;
+    setSubmitting(false);
   }, []);
+
+  // ---- CONVERSATION MANAGER (new backend /api/conversation/turn) ----
+  const handleConfirm = useCallback(async (confirm: boolean) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    setSubmitting(true);
+    setError(null);
+    setErrorCode(null);
+    setPhase('understanding');
+    console.log('[FRONTEND] confirmation:', confirm, 'session', sessionIdRef.current);
+    try {
+      const result = await voiceAgent.confirmListing(sessionIdRef.current, confirm);
+      console.log('[FRONTEND] confirmation result:', result);
+      setConvResult(result);
+      setConvState(result.state);
+      setSessionId(result.session_id);
+      sessionIdRef.current = result.session_id;
+      setLastSpokenText(confirm ? 'Haan' : 'Nahi');
+
+      if (result.state === 'ERROR' || result.error) {
+        const friendly = result.error || (language === 'hi' ? 'कनेक्शन में समस्या आ गई।' : 'Connection mein problem aa gayi.');
+        handleError('confirm-failed', friendly, result.error);
+        return;
+      }
+
+      setResponse(result.agent_message);
+      setAssistantResponse(result.agent_message);
+
+      if (result.state === 'SUCCESS') {
+        // Server already submitted the listing to POST /api/listings.
+        // Display the result directly — no redundant API call.
+        const final = buildFinalListing(result.listing);
+        setFinalListing(final);
+        setConvState('SUCCESS');
+        if (result.listing_id) {
+          setListingId(result.listing_id);
+        }
+        console.log('[FRONTEND] Listing submitted by server. ID:', result.listing_id);
+        setResultSummary(
+          result.listing_id
+            ? (language === 'hi'
+                ? `लिस्टिंग ID: ${result.listing_id} — सफलता!`
+                : `Listing ID: ${result.listing_id} — Success!`)
+            : null
+        );
+        setPhase('speaking');
+        speak(result.agent_message);
+        return;
+      } else if (result.state === 'CANCELLED') {
+        setFinalListing(null);
+        setListingId(null);
+        setResultSummary(null);
+        setPhase('speaking');
+        speak(result.agent_message);
+      } else {
+        setPhase('speaking');
+        speak(result.agent_message);
+      }
+    } catch (e: any) {
+      console.error('[FRONTEND] confirm error', e);
+      const friendly = e?.message?.includes('Failed to fetch') || e?.name === 'TypeError'
+        ? (language === 'hi' ? 'कनेक्शन में समस्या आ गई। कृपया दोबारा प्रयास करें।' : 'Connection mein problem aa gayi. Ek baar phir try karein.')
+        : (language === 'hi' ? 'प्रोसेसिंग में त्रुटि।' : 'Processing error. Please try again.');
+      handleError('network', friendly, String(e).slice(0, 500));
+    } finally {
+      isProcessingRef.current = false;
+      setSubmitting(false);
+    }
+  }, [language, setAssistantResponse, setLastSpokenText, speak, handleError]);
 
   const processTranscript = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
+      // Dev logging: shows EXACTLY what transcript enters the conversation.
+      // Anything printed here is what the parser sees — nothing else.
+      console.log('[FRONTEND] USER TRANSCRIPT:', JSON.stringify(trimmed));
       if (!trimmed) {
         handleError(
           'no-speech',
@@ -193,217 +325,64 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         return;
       }
       isProcessingRef.current = true;
-      console.log('[FRONTEND] request started with text:', trimmed);
-      console.log('[FRONTEND] calling /api/voice-intent');
+      console.log('[FRONTEND] request started with text:', trimmed, 'session', sessionIdRef.current);
       setError(null);
       setErrorCode(null);
-      setParsed(null);
+      setConvResult(null);
+      setConvState('PROCESSING');
       setResponse(null);
       setResultSummary(null);
+      setSubmitting(false);
       if (hasSpeechSynthesis()) window.speechSynthesis.cancel();
       setIsSpeaking(false);
       setTranscript(trimmed);
       setInterim('');
 
-      const roleHint = mode === 'farmer' ? 'farmer' : 'buyer';
-
       try {
-        // Phase 1: Understanding — parse intent via backend (/api/voice-intent)
         setPhase('understanding');
-        // We use the unified assistantService which does: parse -> search -> response
-        // But to show granular phases without faking, we split the steps:
-        // First, call processUserMessage which internally does all three, but we want to show Searching separately.
-        // So we will show Understanding while calling processUserMessage, then Searching is part of it.
-        // Instead, we show Understanding first, then Searching when the backend search happens.
-        // Since processUserMessage is a single call that does all, we simulate phases based on actual sub-steps:
-        // We'll show Understanding immediately, then after 300ms if still processing, show Searching, then Responding.
-        // But spec says do NOT fake with arbitrary delays, so we need to tie phases to actual promises.
-        // To avoid faking, we will call the backend steps separately and update phase accordingly.
 
-        // Import helpers dynamically to avoid circular
-        const { parseVoiceIntent, generateAssistantResponse } = await import('../../services/aiService');
-        const { farmerInventoryService } = await import('../../services/farmerInventoryService');
+        const result = await voiceAgent.processTurn(sessionIdRef.current, trimmed);
+        console.log('[FRONTEND] conversation result:', result);
 
-        // Understanding phase is parseVoiceIntent
-        let parsedIntent: ParsedVoiceIntent;
-        try {
-          parsedIntent = await parseVoiceIntent(trimmed);
-          console.log('[FRONTEND] voice-intent response received:', parsedIntent);
-        } catch (e: any) {
-          console.error('[FRONTEND] voice-intent error:', e);
-          if (e?.name === 'AbortError' || e?.message?.includes('timeout')) {
-            handleError('timeout', language === 'hi' ? 'AI ने समय पर जवाब नहीं दिया। कृपया फिर से कोशिश करें।' : 'AI timed out. Please try again.');
-            return;
-          }
-          throw e;
+        if (result.session_id) {
+          setSessionId(result.session_id);
+          sessionIdRef.current = result.session_id;
         }
+        setConvResult(result);
+        setConvState(result.state);
 
-        if (!parsedIntent || parsedIntent.product === null) {
-          // Still proceed to generate response for UNKNOWN, but show Understanding -> Responding
-          setParsed(parsedIntent);
-          setParsedIntent(parsedIntent);
-          setLastSpokenText(trimmed);
-          if (onParsedResult && parsedIntent) onParsedResult(parsedIntent, trimmed);
-
-          setPhase('responding');
-          const assistantMsg = await generateAssistantResponse(
-            parsedIntent ?? { intent: 'UNKNOWN', product: null, quantity: null, unit: null, quality: null, location: null, date: null, price: null },
-            {},
-            trimmed
-          );
-          if (!assistantMsg || !assistantMsg.trim()) {
-            handleError('empty-response', language === 'hi' ? 'AI ने खाली जवाब दिया। कृपया फिर से कोशिश करें।' : 'AI returned empty response. Please try again.');
-            return;
-          }
-          setResponse(assistantMsg);
-          setAssistantResponse(assistantMsg);
-          setPhase('speaking');
-          speak(assistantMsg);
+        if (result.state === 'ERROR' || result.error) {
+          const friendly = result.error || (language === 'hi' ? 'कनेक्शन में समस्या आ गई।' : 'Connection mein problem aa gayi.');
+          handleError('backend', friendly, result.error);
           return;
         }
 
-        setParsed(parsedIntent);
-        setParsedIntent(parsedIntent);
+        setResponse(result.agent_message);
+        setAssistantResponse(result.agent_message);
         setLastSpokenText(trimmed);
-        if (onParsedResult) onParsedResult(parsedIntent, trimmed);
-
-        // Phase 2: Searching FarmDirect — real marketplace/database via backend
-        console.log('[FRONTEND] starting marketplace search with intent:', parsedIntent);
-        setPhase('searching');
-
-        // Determine role and action
-        const lower = trimmed.toLowerCase();
-        const isAddIntent = /(\badd\b|\bhave\b|\bhain\b|\bpaas\b.*\bhai\b|\bbechna\b)/i.test(trimmed) && !!parsedIntent.product && !!parsedIntent.quantity;
-        const isInventoryQuery = /show.*inventory|my inventory|my produce|stock/i.test(lower);
-        const isBuyerQuery = /show.*buyers|buyers.*looking|who.*interested|khareedar/i.test(lower);
-
-        let searchResults: any = null;
-        let addedProduce: any = null;
-        let buyerDemand: any = null;
-        let inventory: any = null;
-
-        try {
-          if ((parsedIntent.intent === 'SELLER' || mode === 'farmer') && isAddIntent) {
-            // Seller add — goes through backend API (farmerInventoryService)
-            const catMap: Record<string, string> = {
-              Tomato: 'vegetables', Potato: 'vegetables', Onion: 'vegetables', Wheat: 'grains', Rice: 'grains', Cauliflower: 'vegetables', Cabbage: 'vegetables', Carrot: 'vegetables', Peas: 'vegetables', Apple: 'fruits', Banana: 'fruits', Mango: 'fruits',
-            };
-            const category = (catMap[parsedIntent.product!] || 'vegetables') as any;
-            const produce = await farmerInventoryService.addProduce({
-              produceName: parsedIntent.product!,
-              category,
-              quantity: parsedIntent.quantity!,
-              unit: (parsedIntent.unit as any) || 'kg',
-              grade: (parsedIntent.quality as any) || 'Grade A',
-              expectedPrice: parsedIntent.price || 25,
-              location: parsedIntent.location || 'Dasna, Ghaziabad',
-              state: 'Uttar Pradesh',
-              harvestDate: new Date().toISOString().slice(0, 10),
-              farmerId: 'f-001',
-            });
-            addedProduce = produce;
-            setResultSummary(
-              language === 'hi'
-                ? `✅ ${produce.name} जोड़ा गया — ${produce.quantityKg} kg`
-                : `✅ Added ${produce.name} — ${produce.quantityKg} kg`
-            );
-          } else if ((parsedIntent.intent === 'SELLER' || mode === 'farmer') && isInventoryQuery) {
-            const res = await fetch('/api/produce?farmerId=f-001');
-            if (!res.ok) throw new Error(`inventory fetch ${res.status}`);
-            const list = await res.json();
-            inventory = list;
-            setResultSummary(language === 'hi' ? `📦 ${list.length} लॉट इन्वेंटरी में` : `📦 ${list.length} lots in inventory`);
-          } else if ((parsedIntent.intent === 'SELLER' || mode === 'farmer') && isBuyerQuery) {
-            const url = parsedIntent.product ? `/api/buyer-requirements?product=${encodeURIComponent(parsedIntent.product)}` : '/api/buyer-requirements';
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(`buyer fetch ${res.status}`);
-            const list = await res.json();
-            buyerDemand = list;
-            setResultSummary(language === 'hi' ? `👥 ${list.length} खरीदार मिले` : `👥 ${list.length} buyers found`);
-          } else {
-            // Buyer search — via backend marketplace
-            console.log('[FRONTEND] starting marketplace search');
-            const res = await fetch('/api/marketplace/search', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ parsedIntent, role: mode === 'farmer' ? 'farmer' : 'buyer', text: trimmed, filters: {} }),
-            });
-            console.log('[FRONTEND] marketplace search status:', res.status);
-            if (!res.ok) {
-              if (res.status === 0 || res.status >= 500) throw new Error('backend unavailable');
-              throw new Error(`search ${res.status}`);
-            }
-            const data = await res.json();
-            console.log('[FRONTEND] marketplace search results:', data);
-            searchResults = data.results || [];
-            setResultSummary(
-              language === 'hi'
-                ? `🔍 ${data.total} परिणाम मिले`
-                : `🔍 ${data.total} results found`
-            );
-          }
-        } catch (e: any) {
-          // Searching failed — will still try to generate response with fallback context
-          console.warn('Searching FarmDirect failed, fallback to local', e);
-          if (e?.message?.includes('Failed to fetch') || e?.message?.includes('backend')) {
-            handleError('network', language === 'hi' ? 'नेटवर्क त्रुटि। कृपया कनेक्शन जांचें।' : 'Network error. Please check connection.');
-            return;
-          }
-          // For other searching errors, continue to responding with fallback
-          setResultSummary(null);
-        }
-
-        // Phase 3: Responding — generate AI response via backend
-        console.log('[FRONTEND] calling /api/assistant-response');
-        setPhase('responding');
-        let context: any = {};
-        if (searchResults) {
-          context.farmersFound = searchResults.length;
-          context.farmerNames = searchResults.slice(0, 3).map((r: any) => r.farmer?.name || r.name);
-        } else if (buyerDemand) {
-          context.buyersFound = buyerDemand.length;
-          context.buyerNames = buyerDemand.slice(0, 3).map((r: any) => r.buyerName || r.buyerId);
-        } else if (inventory) {
-          context.inventoryCount = inventory.length;
-        } else if (addedProduce) {
-          context.added = addedProduce.name;
-        }
-
-        let assistantMsg: string;
-        try {
-          assistantMsg = await generateAssistantResponse(parsedIntent, context, trimmed);
-          console.log('[FRONTEND] final response received:', assistantMsg);
-        } catch (e: any) {
-          if (e?.name === 'AbortError' || e?.message?.includes('timeout')) {
-            handleError('timeout', language === 'hi' ? 'AI ने समय पर जवाब नहीं दिया।' : 'AI timed out.');
-            return;
-          }
-          throw e;
-        }
-
-        if (!assistantMsg || !assistantMsg.trim()) {
-          handleError('empty-response', language === 'hi' ? 'AI ने खाली जवाब दिया।' : 'AI returned empty response.');
-          return;
-        }
-
-        setResponse(assistantMsg);
-        setAssistantResponse(assistantMsg);
         setPhase('speaking');
-        speak(assistantMsg);
+        speak(result.agent_message);
+
       } catch (e: any) {
         console.error('[VoiceAssistant] process error:', e);
-        if (e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError')) {
-          handleError('network', language === 'hi' ? 'नेटवर्क या बैकएंड उपलब्ध नहीं।' : 'Network or backend unavailable. Please try again.');
-        } else if (e?.name === 'AbortError') {
-          handleError('timeout', language === 'hi' ? 'समय समाप्त।' : 'Request timed out.');
+        const detail = String(e?.message || e).slice(0, 600);
+        console.error('[VoiceAssistant] detail:', detail);
+        let friendly = '';
+        if (e?.name === 'AbortError' || detail.includes('timeout')) {
+          friendly = language === 'hi' ? 'AI ने समय पर जवाब नहीं दिया। कृपया फिर से कोशिश करें।' : 'AI ne samay par jawaab nahi diya. Kripya phir koshish karein.';
+          handleError('timeout', friendly, detail);
+        } else if (detail.includes('Failed to fetch') || detail.includes('NetworkError') || detail.includes('ECONNREFUSED') || e?.name === 'TypeError') {
+          friendly = language === 'hi' ? 'कनेक्शन में समस्या आ गई। कृपया दोबारा प्रयास करें।' : 'Connection mein problem aa gayi. Ek baar phir try karein.';
+          handleError('network', friendly, detail);
         } else {
-          handleError('backend', language === 'hi' ? 'प्रोसेसिंग में त्रुटि।' : 'Processing error. Please try again.');
+          friendly = language === 'hi' ? 'प्रोसेसिंग में त्रुटि। कृपया फिर से कोशिश करें।' : 'Processing mein samasya. Phir try karein.';
+          handleError('backend', friendly, detail);
         }
       } finally {
         isProcessingRef.current = false;
       }
     },
-    [language, mode, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak, handleError]
+    [language, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak, handleError]
   );
 
   const stopListening = useCallback(() => {
@@ -438,7 +417,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     finalTranscriptRef.current = '';
     interimRef.current = '';
     setTranscript('');
-    setParsed(null);
     setResponse(null);
     setResultSummary(null);
     setIsSpeaking(false);
@@ -447,6 +425,19 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
+
+    // Anything the assistant is about to say (or has just said) must never be
+    // captured: while TTS is active, results are dropped and recognition is
+    // aborted. Recognition only processes results while phase === 'listening'.
+    let micAllowed = true;
+    recognition.onaudiostart = () => {
+      if (isSpeakingRef.current) {
+        micAllowed = false;
+        try {
+          recognition.stop();
+        } catch {}
+      }
+    };
 
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -459,6 +450,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     };
 
     recognition.onresult = (event: any) => {
+      // Assistant TTS is active — anything captured is the assistant's own
+      // voice (or its echo), never the farmer. Drop it unconditionally.
+      if (isSpeakingRef.current || phaseRef.current !== 'listening') return;
       let newInterim = '';
       let newFinal = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -542,8 +536,18 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       clearSilenceTimeout();
       const candidate = finalTranscriptRef.current || interimRef.current;
       const filtered = candidate && candidate !== 'सुन रहा हूँ...' && candidate !== 'Listening...' ? candidate.trim() : '';
+      // If the mic captured only assistant audio (TTS active or mic never
+      // allowed after TTS started), discard it — no echo may become "farmer".
+      if (filtered && (isSpeakingRef.current || !micAllowed)) {
+        finalTranscriptRef.current = '';
+        interimRef.current = '';
+        setTranscript('');
+        setInterim('');
+        setPhase((p) => (p === 'listening' ? 'idle' : p));
+        return;
+      }
       if (!filtered) {
-        if (!isProcessingRef.current && !parsed && !response) {
+        if (!isProcessingRef.current && !convResult && !response) {
           // Only show no-speech if we haven't already processed
           if (phase === 'listening') {
             handleError('no-speech', language === 'hi' ? 'मैंने कुछ नहीं सुना। फिर से बोलें।' : "I didn't hear anything. Please try again.");
@@ -565,7 +569,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       console.error(e);
       handleError('mic-start', language === 'hi' ? 'माइक शुरू नहीं हो पाया।' : 'Could not start microphone.');
     }
-  }, [clearSilenceTimeout, getEffectiveSTTLang, language, parsed, processTranscript, response, stopSpeaking, handleError]);
+  }, [clearSilenceTimeout, getEffectiveSTTLang, language, processTranscript, response, stopSpeaking, handleError]);
 
   const handleTypedSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -606,7 +610,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     };
   }, [clearSilenceTimeout]);
 
-  const isIdle = phase === 'idle' && !transcript && !parsed && !response && !error;
+  const isIdle = phase === 'idle' && !transcript && !convResult && !response && !error;
   const showListening = phase === 'listening';
   const showUnderstanding = phase === 'understanding';
   const showSearching = phase === 'searching';
@@ -618,17 +622,10 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     if (val === null || val === undefined || val === '') return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
     return String(val);
   };
-  const formatQuantity = (p: ParsedVoiceIntent | null) => {
-    if (!p || p.quantity === null) return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
-    const unitLabel = p.unit ? ` ${p.unit}` : '';
-    return `${p.quantity}${unitLabel}`;
-  };
-  const formatDate = (date: string | null) => {
-    if (!date) return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
-    if (date === '2026-09-02' || date.toLowerCase().includes('tomorrow')) {
-      return language === 'hi' ? 'कल' : 'Tomorrow';
-    }
-    return date;
+  const formatQuantity = (listing: ListingData | null) => {
+    if (!listing || listing.quantity === null) return language === 'hi' ? 'निर्दिष्ट नहीं' : 'Not specified';
+    const unitLabel = listing.unit ? ` ${listing.unit}` : '';
+    return `${listing.quantity}${unitLabel}`;
   };
 
   const phaseLabel = (() => {
@@ -801,7 +798,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </div>
         )}
 
-        {transcript && phase !== 'listening' && !isProcessing && !showSpeaking && !parsed && !response && !error && (
+        {transcript && phase !== 'listening' && !isProcessing && !showSpeaking && !convResult && !response && !error && (
           <div className="w-full max-w-lg mt-6 bg-white/60 border border-slate-200 rounded-2xl p-4 text-left">
             <p className="text-xs font-bold tracking-wider text-slate-500 uppercase mb-2">
               {language === 'hi' ? 'आपने कहा:' : 'You said:'}
@@ -881,43 +878,6 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           </Card>
         )}
 
-        {parsed && phase !== 'understanding' && !isProcessing && (
-          <Card className="w-full max-w-lg mt-6 bg-white border-slate-200 p-0 overflow-hidden text-left">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Sparkles size={14} className="text-emerald-600" />
-                {language === 'hi' ? 'समझा गया अनुरोध' : 'Understood Request'}
-              </h3>
-              <Badge variant={parsed.intent === 'BUYER' ? 'blue' : parsed.intent === 'SELLER' ? 'emerald' : 'slate'}>
-                {parsed.intent}
-              </Badge>
-            </div>
-            <div className="divide-y divide-slate-800 text-sm">
-              <div className="flex justify-between p-3">
-                <span className="text-slate-500">{language === 'hi' ? 'उत्पाद' : 'Product'}</span>
-                <span className="font-semibold text-slate-900">{formatValue(parsed.product)}</span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-slate-500">{language === 'hi' ? 'मात्रा' : 'Quantity'}</span>
-                <span className="font-semibold text-slate-900">{formatQuantity(parsed)}</span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-slate-500">{language === 'hi' ? 'गुणवत्ता' : 'Quality'}</span>
-                <span className="font-semibold text-slate-900">{formatValue(parsed.quality)}</span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-slate-500">Location</span>
-                <span className="font-semibold text-slate-900">{formatValue(parsed.location)}</span>
-              </div>
-            </div>
-            {resultSummary && (
-              <div className="p-3 bg-emerald-500/10 border-t border-emerald-500/20 text-xs text-emerald-700 flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-600" /> {resultSummary}
-              </div>
-            )}
-          </Card>
-        )}
-
         {response && (
           <Card className="w-full max-w-lg mt-4 bg-emerald-500/10 border-emerald-500/20 p-4 text-left">
             <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-emerald-600 uppercase mb-2">
@@ -941,13 +901,145 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
                 </button>
               )}
             </div>
-            <p className="text-sm text-slate-900 leading-relaxed">{response}</p>
-            {isSpeaking && <p className="text-[11px] text-teal-300 mt-2 animate-pulse">🔊 Speaking in {detectResponseLanguage(response) === 'hi' ? 'Hindi' : 'English'}...</p>}
+            <p className="text-sm text-slate-900 leading-relaxed whitespace-pre-wrap">{response}</p>
+            {isSpeaking && <p className="text-[11px] text-teal-300 mt-2 animate-pulse">Speaking in {detectResponseLanguage(response) === 'hi' ? 'Hindi' : 'English'}...</p>}
+          </Card>
+        )}
+
+        {/* Confirmation card - shows when state is CONFIRMING */}
+        {convState === 'CONFIRMING' && convResult?.listing && (
+          <Card className="w-full max-w-lg mt-4 bg-white border-emerald-200 p-5 text-left shadow-sm">
+            <div className="text-center mb-3">
+              <p className="text-sm font-bold text-slate-900 flex items-center justify-center gap-2">
+                <span>🌱</span> {language === 'hi' ? 'आपकी लिस्टिंग समझ ली:' : 'Aapki listing samajh li:'}
+              </p>
+            </div>
+            <div className="space-y-2 text-sm bg-slate-50 rounded-xl p-4 border border-slate-100">
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Farmer</span>
+                <span className="font-semibold text-slate-900">{formatValue(convResult.listing.farmer_name)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Phone</span>
+                <span className="font-semibold text-slate-900">{formatValue(convResult.listing.phone)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Product</span>
+                <span className="font-semibold text-slate-900 capitalize">{formatValue(convResult.listing.product)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Quantity</span>
+                <span className="font-semibold text-slate-900">{formatQuantity(convResult.listing)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Price</span>
+                <span className="font-semibold text-slate-900">{convResult.listing.asking_price !== null && convResult.listing.asking_price !== undefined ? `₹${convResult.listing.asking_price}/${convResult.listing.price_unit || 'kg'}` : formatValue(convResult.listing.asking_price)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Location</span>
+                <span className="font-semibold text-slate-900">{formatValue(convResult.listing.location)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Quality</span>
+                <span className="font-semibold text-slate-900">{formatValue(convResult.listing.quality)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 flex items-center gap-1.5">Intent</span>
+                <span className="font-semibold text-slate-900 capitalize">{convResult.listing.intent}</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 text-center mt-3">
+              {language === 'hi' ? 'क्या आप इसे मार्केटप्लेस पर बेचना चाहते हैं?' : 'Kya aap ise marketplace par sell karna chahte hain?'}
+            </p>
+            <div className="flex gap-3 mt-4">
+              <Button onClick={() => handleConfirm(true)} disabled={submitting} variant="primary" size="md" className="flex-1 justify-center font-bold">
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : null} {language === 'hi' ? 'हाँ' : 'Haan'}
+              </Button>
+              <Button onClick={() => handleConfirm(false)} disabled={submitting} variant="outline" size="md" className="flex-1 justify-center">
+                {language === 'hi' ? 'नहीं' : 'Nahi'}
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Final collected listing — structured Phase 1 schema shown in dev UI */}
+        {convState === 'SUCCESS' && finalListing && (
+          <Card className="w-full max-w-lg mt-4 bg-white border-emerald-200 p-5 text-left shadow-sm">
+            <div className="flex items-center gap-2 text-xs font-bold tracking-wider text-emerald-700 uppercase mb-3">
+              <ClipboardList size={14} />
+              <span>{language === 'hi' ? 'अंतिम लिस्टिंग JSON' : 'Final Listing JSON'}</span>
+              {listingId && (
+                <span className="ml-auto bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-[10px]">
+                  ID: {listingId}
+                </span>
+              )}
+            </div>
+            <pre className="text-[11px] leading-relaxed bg-slate-900 text-emerald-300 rounded-xl p-4 overflow-x-auto font-mono whitespace-pre">
+              {JSON.stringify(
+                listingId ? { ...finalListing, listing_id: listingId } : finalListing,
+                null,
+                2
+              )}
+            </pre>
+            <p className="text-[11px] text-slate-500 mt-2">
+              {listingId
+                ? (language === 'hi'
+                    ? `लिस्टिंग सफलतापूर्वक बनाई गई — ID: ${listingId}`
+                    : `Listing created successfully — ID: ${listingId}`)
+                : (language === 'hi'
+                    ? 'सभी आवश्यक फ़ील्ड एकत्र कर लिए गए हैं — Phase 1 स्कीमा।'
+                    : 'All required fields collected — Phase 1 schema.')}
+            </p>
+          </Card>
+        )}
+
+        {/* Success - listing created */}
+        {convState === 'SUCCESS' && finalListing && (
+          <Card className="w-full max-w-lg mt-4 bg-emerald-50 border-emerald-200 p-4 text-left">
+            <div className="flex gap-2 items-start">
+              <CheckCircle2 size={18} className="text-emerald-600 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-emerald-800">{language === 'hi' ? 'सफलता!' : 'Success!'}</p>
+                {listingId ? (
+                  <p className="text-xs text-emerald-700 mt-1">
+                    {language === 'hi' ? `लिस्टिंग ID: ${listingId}` : `Listing ID: ${listingId}`} • {finalListing.product} • {finalListing.quantity} {finalListing.unit}
+                  </p>
+                ) : (
+                  <p className="text-xs text-emerald-700 mt-1">
+                    {finalListing.product} • {finalListing.quantity} {finalListing.unit}
+                  </p>
+                )}
+                {resultSummary && <p className="text-[11px] text-emerald-600 mt-1">{resultSummary}</p>}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Cancelled */}
+        {convState === 'CANCELLED' && (
+          <Card className="w-full max-w-lg mt-4 bg-slate-50 border-slate-200 p-4 text-left">
+            <div className="flex gap-2 items-start">
+              <XCircle size={18} className="text-slate-500 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-slate-700">{language === 'hi' ? 'रद्द किया गया' : 'Cancelled'}</p>
+                <p className="text-xs text-slate-600 mt-1">{response}</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* SUBMITTING state - loading */}
+        {convState === 'SUBMITTING' && (
+          <Card className="w-full max-w-lg mt-4 bg-amber-50 border-amber-200 p-4 text-left">
+            <div className="flex gap-2 items-center">
+              <Loader2 size={16} className="text-amber-600 animate-spin" />
+              <p className="text-sm font-medium text-amber-700">{language === 'hi' ? 'लिस्टिंग बना रहा हूँ...' : 'Creating listing...'}</p>
+            </div>
           </Card>
         )}
 
         {/* Mic remains available — no extra Process button needed */}
-        {(response || parsed) && !isProcessing && (
+        {(response || convResult) && !isProcessing && (
           <p className="text-[11px] text-slate-500 mt-4 flex items-center gap-1.5">
             <Mic size={11} /> {language === 'hi' ? 'फिर से बोलने के लिए माइक दबाएँ' : 'Tap mic to speak again — auto-submits'}
           </p>

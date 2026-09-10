@@ -135,7 +135,7 @@ const addProduceViaBackend = async (parsed: ParsedVoiceIntent, _text: string): P
     };
     const category = (catMap[parsed.product] || 'vegetables') as any;
     const grade = (parsed.quality as any) || 'Grade A';
-    const location = parsed.location || 'Dasna, Ghaziabad';
+    const location = parsed.location || '';
     const p = await farmerInventoryService.addProduce({
       produceName: parsed.product,
       category,
@@ -162,7 +162,7 @@ const addProduceViaBackend = async (parsed: ParsedVoiceIntent, _text: string): P
           unit: parsed.unit || 'kg',
           grade: parsed.quality || 'Grade A',
           expectedPrice: parsed.price || 25,
-          location: parsed.location || 'Dasna, Ghaziabad',
+          location: parsed.location || '',
           state: 'Uttar Pradesh',
           harvestDate: new Date().toISOString().slice(0, 10),
           farmerId: 'f-001',

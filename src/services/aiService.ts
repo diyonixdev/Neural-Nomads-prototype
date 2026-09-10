@@ -104,6 +104,54 @@ export interface OptimizedRouteResult {
 const DEMO_TOMORROW_DATE = '2026-09-02';
 const VOICE_INTENT_API_ENDPOINT = '/api/voice-intent';
 const ASSISTANT_RESPONSE_API_ENDPOINT = '/api/assistant-response';
+export const VOICE_ASSISTANT_API_ENDPOINT = '/api/voice-assistant';
+
+// Unified voice assistant types (matches backend /api/voice-assistant response)
+export type VoiceAssistantIntent = 'SELL_PRODUCE' | 'BUY_PRODUCE' | 'FIND_BUYER' | 'FIND_FARMER' | 'CHECK_ORDER' | 'TRACK_DELIVERY' | 'CALL_FARMER' | 'CHECK_PRICE' | 'HELP';
+export interface VoiceAssistantData {
+  product: string | null;
+  quantity: number | null;
+  unit: 'kg' | 'tonnes' | null;
+  grade: string | null;
+  price_per_kg: number | null;
+  currency: 'INR' | null;
+  location?: string | null;
+}
+export interface VoiceAssistantResponse {
+  success: boolean;
+  intent: VoiceAssistantIntent;
+  language?: 'en' | 'hi' | 'hinglish';
+  data: VoiceAssistantData;
+  message: string;
+  missing_fields: string[];
+  requires_confirmation: boolean;
+  confirmation_card?: VoiceAssistantData & { location?: string | null } | null;
+  session_id: string;
+  listing_created?: any;
+  already_exists?: boolean;
+  cancelled?: boolean;
+  error?: string;
+}
+
+// Session handling for stateful conversation
+const VOICE_SESSION_KEY = 'farmdirect_voice_session_id';
+export const getVoiceSessionId = (): string => {
+  try {
+    let sid = localStorage.getItem(VOICE_SESSION_KEY);
+    if (!sid) {
+      sid = `sess-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+      localStorage.setItem(VOICE_SESSION_KEY, sid);
+    }
+    return sid;
+  } catch {
+    return `sess-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+  }
+};
+export const resetVoiceSession = (): string => {
+  const sid = `sess-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+  try { localStorage.setItem(VOICE_SESSION_KEY, sid); } catch {}
+  return sid;
+};
 
 export interface AssistantContext {
   farmersFound?: number;
@@ -511,6 +559,114 @@ const assistantResponseFallback = (requirement: ParsedVoiceIntent, context: Assi
   return lang === 'hinglish'
     ? `Samajh nahi paya. Kripya saaf bolo: jaise "Mujhe 500 kilo tamatar chahiye Ghaziabad mein" ya "Mere paas 2 ton aloo hain, buyers dhoondho".`
     : `I didn't catch that. Try saying: "I need 500 kg tomatoes in Ghaziabad" or "I have 2 tonnes potatoes to sell".`;
+};
+
+export const callVoiceAssistant = async (text: string, opts?: { sessionId?: string; farmerId?: string }): Promise<VoiceAssistantResponse> => {
+  const sid = opts?.sessionId || getVoiceSessionId();
+  console.log('[FRONTEND] voice-assistant calling /api/voice-assistant', { text: text.slice(0,60), sid });
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => {
+    console.error('[FRONTEND] voice-assistant timeout after 20000ms');
+    controller.abort();
+  }, 20000);
+  try {
+    const res = await fetch(VOICE_ASSISTANT_API_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, session_id: sid, farmerId: opts?.farmerId || 'f-001' }),
+      signal: controller.signal,
+    });
+    console.log('[FRONTEND] voice-assistant status:', res.status);
+    const payload = await res.json().catch(() => null) as any;
+    console.log('[FRONTEND] voice-assistant payload:', payload);
+    if (!res.ok) {
+      console.error('[FRONTEND] voice-assistant non-ok detail (dev):', payload?.detail || payload?.error || `HTTP ${res.status}`);
+      // Vite proxy returns 502 {"error":"Backend unavailable"} when backend down - treat as network so fallback gives farmer-friendly message, not raw error
+      const err: any = new Error(payload?.error || `HTTP ${res.status}`);
+      err.name = 'TypeError';
+      throw err;
+    }
+    if (payload && payload.session_id) {
+      try { localStorage.setItem(VOICE_SESSION_KEY, payload.session_id); } catch {}
+    }
+    if (!payload) throw new Error('empty response');
+    if (payload.success === false && payload.message) {
+      return payload as VoiceAssistantResponse;
+    }
+    if (!payload.success && payload.error) {
+      throw new Error(payload.error);
+    }
+    // Ensure required fields exist for UI fallback
+    if (!payload.message) payload.message = 'Samajh gaya.';
+    if (!Array.isArray(payload.missing_fields)) payload.missing_fields = [];
+    return payload as VoiceAssistantResponse;
+  } catch (e:any) {
+    const isNetwork = e?.message?.includes('Failed to fetch') || e?.message?.includes('Backend unavailable') || e?.message?.includes('ECONNREFUSED') || e?.name === 'TypeError' || e?.name === 'AbortError';
+    const isTimeout = e?.name === 'AbortError' || e?.message?.includes('timeout');
+    console.error('[FRONTEND] voice-assistant fetch failed', e);
+    // Farmer-friendly fallback: use local parser to avoid showing raw network error to farmer
+    const fallback = (() => {
+      const fb = parseVoiceIntentFallback(text);
+      // Inline language detect to avoid dependency on later const (handles hi/hinglish/en)
+      const detectLocal = (t: string): 'hi'|'hinglish'|'en' => {
+        if (/[\u0900-\u097F]/.test(t)) return 'hi';
+        const lower = t.toLowerCase();
+        if (/(mujhe|chahiye|paas|hai|hain|dhoondho|kal|tamatar|aloo|pyaaz|gehu|gehun|chawal|mera|mere|kilo|ton|rupaye|rupaiya|grade|haan|nahi|bechna|khareed|kharid)/.test(lower)) return 'hinglish';
+        return 'en';
+      };
+      const lang = detectLocal(text);
+      let intent: VoiceAssistantIntent = 'HELP';
+      if (fb.intent === 'SELLER') intent = 'SELL_PRODUCE';
+      else if (fb.intent === 'BUYER') intent = 'BUY_PRODUCE';
+      const data: VoiceAssistantData = {
+        product: fb.product || null,
+        quantity: fb.quantity || null,
+        unit: fb.unit || null,
+        grade: fb.quality ? (fb.quality.includes('A') ? 'A' : fb.quality.includes('B') ? 'B' : fb.quality) : null,
+        price_per_kg: fb.price || null,
+        currency: fb.price ? 'INR' : null,
+        location: fb.location || null,
+      };
+      const missing: string[] = [];
+      if (!data.product) missing.push('product');
+      if (data.quantity == null) missing.push('quantity');
+      if (!data.grade) missing.push('grade');
+      if (data.price_per_kg == null) missing.push('price_per_kg');
+      const requires_confirmation = missing.length === 0 && !!data.product;
+      let message = '';
+      if (missing.length > 0) {
+        if (lang === 'hinglish') message = data.quantity != null ? `Aapke paas ${data.quantity} kg ${data.product || 'produce'} hain. Aapka grade aur price kya hai?` : `Kaunsa product aur kitni quantity hai?`;
+        else if (lang === 'hi') message = 'कृपया बाकी जानकारी बताएं।';
+        else message = missing.includes('quantity') ? `How many kilograms of ${data.product || 'produce'} do you have?` : `What is the grade and price?`;
+      } else {
+        if (lang === 'hinglish') message = `Samajh gaya. Aapke paas ${data.quantity} kg Grade ${data.grade || 'A'} ${data.product} hain, ₹${data.price_per_kg}/kg par. Kya aap ise marketplace par sell karna chahte hain?`;
+        else if (lang === 'hi') message = `समझ गया। आपके पास ${data.quantity} किलो ${data.product} हैं, ₹${data.price_per_kg}/kg पर।`;
+        else message = `Got it. You have ${data.quantity} kg of Grade ${data.grade || 'A'} ${data.product} at ₹${data.price_per_kg}/kg.`;
+      }
+      return {
+        success: true,
+        intent,
+        language: lang as any,
+        data,
+        message,
+        missing_fields: missing,
+        requires_confirmation,
+        confirmation_card: requires_confirmation ? data as any : null,
+        session_id: sid,
+      } as VoiceAssistantResponse;
+    })();
+    if (isNetwork || isTimeout) {
+      console.warn('[FRONTEND] voice-assistant network/timeout, using local fallback parsed:', fallback);
+      if (!fallback.data.product && fallback.missing_fields.length > 2) {
+        const friendly = getVoiceSessionId() ? (fallback.language === 'hi' ? 'कनेक्शन में समस्या आ गई। कृपया दोबारा प्रयास करें।' : fallback.language === 'hinglish' ? 'Connection mein problem aa gayi. Ek baar phir try karein.' : "We couldn't connect right now. Please try again.") : 'Connection mein problem aa gayi.';
+        return { ...fallback, message: friendly + ' ' + fallback.message, success: true };
+      }
+      return fallback;
+    }
+    throw e;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 };
 
 export const generateAssistantResponse = async (

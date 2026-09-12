@@ -73,6 +73,7 @@ const setStored = (list: Produce[]) => {
     window.dispatchEvent(new CustomEvent('farmdirect:inventory-updated', { detail: { count: list.length } }));
   } catch (e) {
     console.error('Failed to persist inventory', e);
+    throw e;
   }
 };
 
@@ -169,10 +170,13 @@ export const farmerInventoryService = {
       });
       if (res.ok) {
         // Assume backend persisted; also persist locally for immediate UI
-        const stored = getStored();
-        stored.unshift(produce);
-        setStored(stored);
-        return produce;
+    const stored = getStored();
+    stored.unshift(produce);
+    setStored(stored);
+    console.log('[ADD_VOICE_LISTING] Stored produce count:', stored.length);
+    console.log('[ADD_VOICE_LISTING] localStorage key:', STORAGE_KEY);
+    console.log('[ADD_VOICE_LISTING] localStorage value (first 500 chars):', localStorage.getItem(STORAGE_KEY)?.slice(0, 500));
+    return produce;
       }
       // non-ok -> fallback
     } catch {
@@ -231,6 +235,85 @@ export const farmerInventoryService = {
   clearAll(): void {
     localStorage.removeItem(STORAGE_KEY);
     window.dispatchEvent(new CustomEvent('farmdirect:inventory-updated'));
+  },
+
+  /**
+   * Store a voice-created listing as a Produce item so it appears in My Produce.
+   * Called after POST /api/listings succeeds — bridges Firestore → localStorage.
+   */
+  addVoiceListing(listing: {
+    farmer_name?: string | null;
+    phone?: string | null;
+    product?: string | null;
+    quantity?: number | null;
+    unit?: string | null;
+    asking_price?: number | null;
+    price_unit?: string | null;
+    location?: string | null;
+    quality?: string | null;
+    listing_id?: string;
+  }): Produce {
+    console.log('[ADD_VOICE_LISTING] Input:', JSON.stringify(listing, null, 2));
+    const farmerId = 'f-001';
+    const farmer = mockFarmers.find((f) => f.id === farmerId) ?? mockFarmers[0];
+    const product = String(listing.product || 'Unknown');
+    const lower = product.toLowerCase();
+    const quantity = Number(listing.quantity) || 0;
+    const unit = (listing.unit || 'kg') as ProduceUnit;
+    const quantityKg = unitToKg(quantity, unit);
+    const askingPrice = Number(listing.asking_price) || 0;
+    const quality = listing.quality || 'Grade A';
+    const location = listing.location || 'Unknown';
+    const grade: ProduceGrade = /organic/i.test(quality) ? 'Organic Premium' : /b/i.test(quality) ? 'Grade B' : 'Grade A';
+
+    let category: ProduceCategory = 'vegetables';
+    if (/(tomato|potato|onion|carrot|peas|cauliflower|cabbage|bhindi|palak|mirch|gobhi)/i.test(lower)) category = 'vegetables';
+    else if (/(apple|banana|mango|seb|kela|aam)/i.test(lower)) category = 'fruits';
+    else if (/(wheat|rice|gehun|chawal|corn|maize|bajra|jowar)/i.test(lower)) category = 'grains';
+    else if (/(dal|chana|moong|masoor|urad|arhar|moongfali)/i.test(lower)) category = 'pulses';
+
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const defaultShelf = category === 'grains' ? 180 : category === 'fruits' ? 7 : 5;
+    const id = listing.listing_id || `prod-voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const produce: Produce = {
+      id,
+      name: `${quality} ${product} - ${farmer.name}`,
+      nameHi: `${quality} ${product} - ${farmer.name}`,
+      category,
+      grade,
+      quantityKg,
+      expectedPricePerKg: askingPrice,
+      mandiPricePerKg: Math.round(askingPrice * 0.75),
+      harvestDate: today,
+      location: location.includes(',') ? location : `${location}, ${farmer.state || 'Uttar Pradesh'}`,
+      state: farmer.state || 'Uttar Pradesh',
+      farmerId,
+      fpoId: farmer.fpoId,
+      availableFrom: `${today}T06:00:00+05:30`,
+      availableUntil: new Date(now.getTime() + defaultShelf * 86400000).toISOString(),
+      shelfLifeDays: defaultShelf,
+      pesticideResidueStatus: 'clear' as const,
+      certifications: [grade],
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    const stored = getStored();
+    stored.unshift(produce);
+    try {
+      setStored(stored);
+    } catch {
+      // setStored threw — localStorage failed; fall back to direct write
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        window.dispatchEvent(new CustomEvent('farmdirect:inventory-updated', { detail: { count: stored.length } }));
+      } catch {
+        console.error('Failed to persist inventory after retry');
+      }
+    }
+    return produce;
   },
 
   // helper for buyer demand insights - expose buyer requirements via same pattern (could extend)

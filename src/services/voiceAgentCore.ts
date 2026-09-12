@@ -62,6 +62,10 @@ export type VoiceAgentEvent =
 
 export class VoiceAgentCore {
   private sessionIds: Map<string, string> = new Map();
+  // Exactly-once submission guards: repeated "Haan" events, React re-renders,
+  // or duplicate confirm calls must not create more than ONE listing per session.
+  private submittedIds: Map<string, string> = new Map();
+  private submitInFlight: Map<string, Promise<SubmitListingResult>> = new Map();
 
   /**
    * Create a new conversation session.
@@ -145,12 +149,27 @@ export class VoiceAgentCore {
    * @returns SubmitListingResult with listing_id on success
    */
   async submitToApi(sessionId: string): Promise<SubmitListingResult> {
+    // Idempotent: return the preserved listing_id without re-POSTing.
+    const cached = this.submittedIds.get(sessionId);
+    if (cached) {
+      return { success: true, listing_id: cached, status: 'created' };
+    }
+    const inflight = this.submitInFlight.get(sessionId);
+    if (inflight) return inflight;
+
     const session = getConversationSession(sessionId);
     if (!session) {
       return {
         success: false,
         error: 'Session not found',
       };
+    }
+
+    // If the API was already called during processTurn/confirmListing and
+    // the session carries a listing_id, register it and return immediately.
+    if (session.listing_id) {
+      this.submittedIds.set(sessionId, session.listing_id);
+      return { success: true, listing_id: session.listing_id, status: 'created' };
     }
 
     if (session.state !== 'SUCCESS') {
@@ -160,21 +179,31 @@ export class VoiceAgentCore {
       };
     }
 
-    try {
-      const finalListing = buildFinalListing(session.listing);
-      const result = await submitListingApi(finalListing);
-      return {
-        success: result.success,
-        listing_id: result.listing_id,
-        status: result.status,
-        error: result.error,
-      };
-    } catch (e: any) {
-      return {
-        success: false,
-        error: e?.message || 'Submission failed',
-      };
-    }
+    const pending = (async (): Promise<SubmitListingResult> => {
+      try {
+        const finalListing = buildFinalListing(session.listing);
+        const result = await submitListingApi(finalListing);
+        if (result.success && result.listing_id) {
+          // Preserve listing_id for duplicate callers / re-renders.
+          this.submittedIds.set(sessionId, result.listing_id);
+        }
+        return {
+          success: result.success,
+          listing_id: result.listing_id,
+          status: result.status,
+          error: result.error,
+        };
+      } catch (e: any) {
+        return {
+          success: false,
+          error: e?.message || 'Submission failed',
+        };
+      } finally {
+        this.submitInFlight.delete(sessionId);
+      }
+    })();
+    this.submitInFlight.set(sessionId, pending);
+    return pending;
   }
 
   /**
@@ -183,6 +212,8 @@ export class VoiceAgentCore {
   resetSession(sessionId: string): void {
     resetConversation(sessionId);
     this.sessionIds.delete(sessionId);
+    this.submittedIds.delete(sessionId);
+    this.submitInFlight.delete(sessionId);
   }
 
   /**

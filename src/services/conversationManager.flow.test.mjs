@@ -194,6 +194,180 @@ describe('LIVE /farmer/voice flow (frontend engine)', () => {
     assert.equal(r.listing.phone, '9876543210', 'phone preserved');
   });
 
+  // ===== REGRESSION: product must never be replaced by price =====
+  it('₹10 in price turn must not overwrite product (wheat)', async () => {
+    const sid = 'price-product-wheat';
+    resetConversation(sid);
+    const r1 = await processTurn(sid, '10 kilo wheat hai');
+    assert.equal(r1.listing.product, 'Wheat');
+    assert.equal(r1.listing.quantity, 10);
+    assert.equal(s(r1.listing.asking_price), null, 'price not yet set');
+
+    const r2 = await processTurn(sid, '₹10 mein bechna hai');
+    assert.equal(r2.listing.product, 'Wheat', 'product must stay Wheat, not become ₹10');
+    assert.equal(r2.listing.asking_price, 10, 'price correctly extracted');
+    assert.equal(/gehun|wheat/i.test(r2.agent_message), true, `response must mention product, got: ${r2.agent_message}`);
+    assert.equal(/₹.*ki quality/i.test(r2.agent_message), false, `response must not have ₹ in product position, got: ${r2.agent_message}`);
+  });
+
+  it('₹20 in price turn must not overwrite product (tomatoes)', async () => {
+    const sid = 'price-product-tomato';
+    resetConversation(sid);
+    const r1 = await processTurn(sid, '5 kilo tamatar hai');
+    assert.equal(r1.listing.product, 'Tomato');
+    assert.equal(r1.listing.quantity, 5);
+
+    const r2 = await processTurn(sid, '₹20 mein dena hai');
+    assert.equal(r2.listing.product, 'Tomato', 'product must stay Tomato, not become ₹20');
+    assert.equal(r2.listing.asking_price, 20, 'price correctly extracted');
+    assert.equal(/tamatar/i.test(r2.agent_message), true, `response must mention product, got: ${r2.agent_message}`);
+  });
+
+  // ===== REGRESSION: context-aware field suppression (quality question) =====
+  it('TEST 1: "Bdia quality hai" when last_asked=quality must not overwrite product', async () => {
+    const sid = 'ctx-1';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Mera naam Bdia hai');
+    await processTurn(sid, 'Meerut se hoon');
+    await processTurn(sid, 'Tomato bechna hai');
+    await processTurn(sid, '2 kilo');
+    await processTurn(sid, '₹10 rupaye kilo');
+    // Now system asks for quality
+    const r = await processTurn(sid, 'Bdia quality hai');
+    assert.equal(r.listing.product, 'Tomato', 'product must remain Tomato');
+    assert.notEqual(r.listing.quality, null, 'quality must be extracted');
+    assert.equal(r.listing.farmer_name, 'Bdia');
+  });
+
+  it('TEST 2: "Grade A quality hai" when last_asked=quality must not overwrite product', async () => {
+    const sid = 'ctx-2';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Mera naam Raj hai');
+    await processTurn(sid, 'Wheat bechna hai');
+    await processTurn(sid, '5 kilo');
+    await processTurn(sid, '₹15 rupaye kilo');
+    const r = await processTurn(sid, 'Grade A quality hai');
+    assert.equal(r.listing.product, 'Wheat', 'product must remain Wheat');
+    assert.equal(r.listing.quality, 'Grade A');
+  });
+
+  it('TEST 3: "premium quality hai" when last_asked=quality must not overwrite product', async () => {
+    const sid = 'ctx-3';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Potato bechna hai');
+    await processTurn(sid, '3 kilo');
+    await processTurn(sid, '₹8 rupaye kilo');
+    const r = await processTurn(sid, 'premium quality hai');
+    assert.equal(r.listing.product, 'Potato', 'product must remain Potato');
+    assert.notEqual(r.listing.quality, null, 'quality must be extracted');
+  });
+
+  it('TEST 4: "fresh and excellent" when last_asked=quality must not overwrite product', async () => {
+    const sid = 'ctx-4';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Onion bechna hai');
+    await processTurn(sid, '4 kilo');
+    await processTurn(sid, '₹12 rupaye kilo');
+    const r = await processTurn(sid, 'fresh and excellent');
+    assert.equal(r.listing.product, 'Onion', 'product must remain Onion');
+    assert.notEqual(r.listing.quality, null, 'quality must be extracted');
+  });
+
+  it('TEST 5: "Meerut se" when last_asked=location must not overwrite product', async () => {
+    const sid = 'ctx-5';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Carrot bechna hai');
+    await processTurn(sid, '6 kilo');
+    await processTurn(sid, '₹25 rupaye kilo');
+    const r = await processTurn(sid, 'Meerut se');
+    assert.equal(r.listing.product, 'Carrot', 'product must remain Carrot');
+    assert.equal(r.listing.location, 'Meerut');
+  });
+
+  it('TEST 6: "10 kilo" when last_asked=quantity must not overwrite product', async () => {
+    const sid = 'ctx-6';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Peas bechna hai');
+    await processTurn(sid, '₹18 rupaye kilo');
+    const r = await processTurn(sid, '10 kilo');
+    assert.equal(r.listing.product, 'Peas', 'product must remain Peas');
+    assert.equal(r.listing.quantity, 10);
+    assert.equal(r.listing.unit, 'kg');
+  });
+
+  it('TEST 7: "Main tomato bechna chahta hoon" extracts product', async () => {
+    const sid = 'ctx-7';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    const r = await processTurn(sid, 'Main tomato bechna chahta hoon');
+    assert.equal(r.listing.product, 'Tomato');
+  });
+
+  it('TEST 8: "10 kilo tomato ₹20 mein bechna hai" extracts all fields', async () => {
+    const sid = 'ctx-8';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    const r = await processTurn(sid, '10 kilo tomato ₹20 mein bechna hai');
+    assert.equal(r.listing.product, 'Tomato');
+    assert.equal(r.listing.quantity, 10);
+    assert.equal(r.listing.unit, 'kg');
+    assert.equal(r.listing.asking_price, 20);
+    assert.equal(r.listing.price_unit, 'kg');
+  });
+
+  it('TEST 9: full conversation then quality answer must preserve product', async () => {
+    const sid = 'ctx-9';
+    resetConversation(sid);
+    await processTurn(sid, 'Namaste');
+    await processTurn(sid, 'Mera naam Ramesh hai');
+    await processTurn(sid, 'Ghaziabad se hoon');
+    await processTurn(sid, 'Tomato bechna hai');
+    await processTurn(sid, '10 kilo');
+    await processTurn(sid, '₹20 rupaye kilo');
+    await processTurn(sid, '9876543210');
+    // Now in CONFIRMING state — user says arbitrary quality text
+    const r = await processTurn(sid, 'Bdia quality hai');
+    assert.equal(r.listing.product, 'Tomato', 'product must remain Tomato');
+    assert.equal(r.listing.farmer_name, 'Ramesh');
+    assert.equal(r.listing.location, 'Ghaziabad');
+    assert.equal(r.listing.quantity, 10);
+    assert.equal(r.listing.asking_price, 20);
+    assert.equal(r.listing.phone, '9876543210');
+    // In CONFIRMING state, "quality" keyword triggers a change question
+    // — the product must NOT be overwritten by the quality text
+    assert.equal(r.state, 'CONFIRMING');
+  });
+
+  it('TEST 10: multiple unseen quality descriptions all work generically', async () => {
+    const qualityInputs = [
+      'Bdia quality hai',
+      'premium quality hai',
+      'fresh and excellent',
+      'bahut achhi quality hai',
+      'average quality hai',
+      'Grade B quality hai',
+      'normal hai',
+      'shandar quality hai',
+    ];
+    for (const input of qualityInputs) {
+      const sid = 'ctx-10-' + qualityInputs.indexOf(input);
+      resetConversation(sid);
+      await processTurn(sid, 'Namaste');
+      await processTurn(sid, 'Wheat bechna hai');
+      await processTurn(sid, '5 kilo');
+      await processTurn(sid, '₹15 rupaye kilo');
+      const r = await processTurn(sid, input);
+      assert.equal(r.listing.product, 'Wheat', `product must remain Wheat for input "${input}"`);
+      assert.notEqual(r.listing.quality, null, `quality must be extracted for input "${input}"`);
+    }
+  });
+
   // ===== REGRESSION: full flow end-to-end =====
   it('complete flow: collect all -> confirm -> "Nahi" -> SUCCESS', async () => {
     const sid = 'e2e-1';

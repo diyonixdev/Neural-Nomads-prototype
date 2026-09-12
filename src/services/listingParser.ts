@@ -25,15 +25,17 @@ const GLUE_WORDS = new Set([
   // Postpositions / particles
   'ko', 'se', 'mein', 'ka', 'ki', 'ke', 'par', 'tak', 'bhi', 'hi', 'to', 'na', 'ne', 'liye',
   'wala', 'wali', 'rakho', 'rakhi', 'rakhna', 'rakhta', 'rakhte', 'rakhu',
-  'de', 'dena', 'dene', 'do', 'dijiye', 'diya', 'diye', 'kara',
+  'de', 'dena', 'dene', 'do', 'dijiye', 'kara',
   'karo', 'kar', 'kiye', 'liya', 'hua', 'hoti', 'hota', 'honge', 'hogi',
   'aur', 'the', 'a', 'an', 'of', 'for', 'and',
   // Pronouns and address words
   'ji', 'aap', 'aapko', 'aapka', 'aapki', 'aapne', 'mujhe', 'main', 'mera', 'meri', 'mere',
   'hum', 'tum', 'yeh', 'ye', 'woh', 'wo', 'kya',
-  // Conversation fillers / yes-no / quantity-in-words used by echoes
+  // Conversation fillers / yes-no / quality descriptors / quantity-in-words used by echoes
   'nahi', 'nahin', 'haan', 'theek', 'thik', 'bilkul', 'sahi', 'galat', 'sab', 'kuch',
   'kitna', 'kitne', 'ek', 'baar', 'teen', 'chaar', 'paanch',
+  'achhi', 'acchi', 'accha', 'achha', 'badhiya', 'badiya', 'shandar', 'uttam',
+  'kharab', 'bekar',
   // Common verbs and time adverbs (closed-class grammar words)
   'bechna', 'chahiye', 'chahte', 'chahenge', 'khareed', 'kal', 'aaj', 'parso',
   'subah', 'shaam', 'raat', 'din', 'tak',
@@ -52,6 +54,20 @@ const looksLikeCleanValue = (value: string, maxWords = 3): boolean => {
   if (words.some((w) => /^(hai|hain|hoon|hun|nahi|nahin|bechna|sell|buy)$/.test(w))) return false;
   return true;
 };
+
+// Known crops — the closed vocabulary that normalizeProduct returns before
+// falling through to the open-ended extractAnyProduct. Used by
+// isKnownCrop() to distinguish strong product evidence (actual crop name)
+// from weak evidence (arbitrary word picked up by extractAnyProduct).
+const KNOWN_CROPS = new Set([
+  'Tomato', 'Potato', 'Onion', 'Wheat', 'Rice',
+  'Cauliflower', 'Cabbage', 'Carrot', 'Peas',
+  'Apple', 'Banana', 'Mango',
+]);
+
+/** Returns true if `product` is one of the known crop names. */
+const isKnownCrop = (product: string | null): product is string =>
+  product !== null && KNOWN_CROPS.has(product);
 
 const normalizeProduct = (text: string): string | null => {
   const t = text.toLowerCase();
@@ -96,8 +112,10 @@ const PRODUCT_FILLERS = new Set([
   'location','address','gaon','village','shehar','city','jagah',
   // Contact words
   'phone','number','mobile','name','naam',
-  // Quality words
-  'quality','grade',
+  // Quality words — must never be extracted as product names
+  'quality','grade','achhi','acchi','accha','achha','badhiya','badiya','shandar','uttam',
+  'theek','thik','average','normal','medium','ok',
+  'kharab','bekar','poor','bad',
   // Common Hindi/English fillers
   'nahi','nahin','no','yes','haan','theek','ok','okay','ji',
   // Context markers (words that come before location/name)
@@ -106,12 +124,15 @@ const PRODUCT_FILLERS = new Set([
   'actually','wait','sorry','please','sir','madam','bhaiya','didi','uncle','aunty',
   'change','modify','edit','update','correct','fix','badal','badalna','badalni','karo','karna','kar',
   'galat','kuch','sab','fasal','saman','item','product','crop',
-  'want','wants','need','needs','have','has','had','give','giving','getting',
+  'want','wants','need','needs','have','has','had','give','giving','getting','is','are','was','were','am','be','been','being','do','does','did','will','would','can','could','should','may','might','must','shall',
+  // NOTE: Never hardcode person names — dynamic nameWords exclusion handles that.
 ]);
 
 const extractAnyProduct = (text: string): string | null => {
   const detectedLoc = detectLocation(text);
   const locWords = detectedLoc ? new Set(detectedLoc.toLowerCase().split(/\s+/)) : new Set();
+  const detectedName = extractNameFromText(text);
+  const nameWords = detectedName ? new Set(detectedName.toLowerCase().split(/\s+/)) : new Set();
 
   const norm = text.toLowerCase().replace(/[.,!?;:'"()]/g, ' ');
   const words = norm.split(/\s+/).filter(Boolean);
@@ -121,9 +142,11 @@ const extractAnyProduct = (text: string): string | null => {
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     if (/^\d/.test(w)) continue;
+    if (/^[₹$€£]|^(?:rs|inr)\b/i.test(w)) continue;
     if (PRODUCT_FILLERS.has(w)) continue;
     if (GLUE_WORDS.has(w)) continue;
     if (locWords.has(w)) continue; // Skip words belonging to detected location
+    if (nameWords.has(w)) continue; // Skip words belonging to detected farmer name (dynamic, not hardcoded)
     if (/^(kg|kilo|kilos|kilogram|ton|tonne|tonnes|quintal|qtl|litre|liter|piece|bag|dozen|किलो|टन|क्विंटal|लीटर|पीस|बोरी|दर्जन)$/.test(w)) continue;
     if (/^(rupaye|rupee|rs|₹|per|kimat|rate|daam|bhav)$/.test(w)) continue;
     if (/^(hai|hain|ho|hun|hoon|se|mein|ka|ki|ke|aur|ya|bhi|to|phir|ab)$/.test(w)) continue;
@@ -214,7 +237,28 @@ const parseGrade = (text: string): string | null => {
   const n = text.toLowerCase();
   if (/(grade\s*a|ग्रेड\s*ए)/.test(n)) return 'Grade A';
   if (/(grade\s*b|ग्रेड\s*बी)/.test(n)) return 'Grade B';
-  if (/organic/.test(n)) return 'Organic';
+  if (/organic|ऑर्गेनिक/.test(n)) return 'Organic';
+  // Hindi/Hinglish quality descriptors — dynamic, not hardcoded product data.
+  // Maps spoken quality words to structured values so they are never mistaken
+  // for product names or other fields.
+  if (/(quality\s+(?:achhi|acchi|accha|achha|badhiya|badiya|good|best)|(?:achhi|acchi|accha|achha|badhiya|badiya|good|best|shandar|uttam)\s+quality|quality\s+is\s+good|quality\s+good)/.test(n)) {
+    return 'Good';
+  }
+  if (/(quality\s+(?:theek|thik|average|normal|medium|ok)|(?:theek|thik|average|normal|medium|ok)\s+quality)/.test(n)) {
+    return 'Average';
+  }
+  if (/(quality\s+(?:kharab|bekar|poor|bad)|(?:kharab|bekar|poor|bad)\s+quality)/.test(n)) {
+    return 'Poor';
+  }
+  if (/\b(achhi|acchi|accha|achha|badhiya|badiya|shandar|uttam)\b/.test(n) && !/\b(naam|name|se|kilo|rupaye)\b/.test(n)) {
+    return 'Good';
+  }
+  if (/\b(theek|thik|average|normal|medium|ok)\b/.test(n) && !/\b(naam|name|se|kilo|rupaye)\b/.test(n)) {
+    return 'Average';
+  }
+  if (/\b(kharab|bekar|poor|bad)\b/.test(n) && !/\b(naam|name|se|kilo|rupaye)\b/.test(n)) {
+    return 'Poor';
+  }
   return null;
 };
 
@@ -255,7 +299,16 @@ const detectLocation = (text: string): string | null => {
   ]);
   const SWALLOWED = new Set([
     'main', 'mein', 'me', 'i', 'my', 'mera', 'meri', 'mere', 'hum', 'naam', 'name',
+    'hello','hi','hey','hii','helloo','helo','namaste','namaskar','namaskaram',
     ...Array.from(GLUE_WORDS),
+  ]);
+  const PRODUCT_WORDS = new Set([
+    'tomato','tomatoes','tamatar','potato','potatoes','aloo','onion','onions','pyaaz','pyaz',
+    'wheat','gehun','gehu','rice','chawal','cauliflower','gobhi','cabbage','carrot','gajar',
+    'peas','matar','apple','seb','banana','kela','mango','aam','maize','makka','corn','cotton','kapas',
+    'sugarcane','ganna','soybean','soyabean','bajra','jowar','barley','jau','mustard','sarson','groundnut','moongphali','moong','dal','chana','masoor','urad','arhar','mirch','chilli','dhaniya','coriander','jeera','cumin','haldi','turmeric',
+    // Quality descriptors — never place names
+    'achhi','acchi','accha','achha','badhiya','badiya','shandar','uttam','kharab','bekar',
   ]);
 
   const cleanCandidate = (start: number, end: number): string | null => {
@@ -268,19 +321,18 @@ const detectLocation = (text: string): string | null => {
       if (SWALLOWED.has(w) && words.length === 0) continue; // leading filler
       if (SWALLOWED.has(w)) break;
       if (/^\d/.test(w)) return null;
+      if (PRODUCT_WORDS.has(w)) return null;
       words.push(w);
     }
     if (words.length === 0 || words.length > 3) return null;
     const cand = words.join(' ');
+    if (cand.split(/\s+/).some(ww => PRODUCT_WORDS.has(ww.toLowerCase()))) return null;
     return looksLikeCleanValue(cand, 3) ? titleCase(cand) : null;
   };  for (let i = 0; i < tokens.length; i++) {
     const w = tokens[i];
-    // Pattern: <PLACE> <PREP> (<BE>|<TIME>|end) — "ghaziabad se hoon",
-    // "pune mein hoon", "ghaziabad mein kal tak". The be-verb/time/end
-    // requirement stops "wheat in Delhi" from returning "Wheat".
+    // Pattern: <PLACE> <PREP> — "ghaziabad se", "meerut se", "pune mein" (even mid-sentence)
     if (!PREP.has(w) && !HEAD.has(w) && !SWALLOWED.has(w) && !BE.has(w) && !NOT_PLACE.has(w) &&
-        i + 1 < tokens.length && PREP.has(tokens[i + 1]) &&
-        (i + 2 >= tokens.length || BE.has(tokens[i + 2]) || TIME.has(tokens[i + 2]))) {
+        i + 1 < tokens.length && PREP.has(tokens[i + 1])) {
       const cand = cleanCandidate(i, i);
       if (cand) return cand;
     }
@@ -301,18 +353,32 @@ const detectLocation = (text: string): string | null => {
   // Ghaziabad, mera naam Raj hai". A standalone 1-2 word segment is a
   // location candidate only if it is clean AND cannot be a product of the
   // sentence (normalizeProduct(segment) === null), so crops are never
-  // mistaken for places. Leading correction words ("Actually Noida") are
-  // stripped; pure corrections ("No", "change") reduce to nothing.
+  // mistaken for places. Names are also excluded: "Priya" in
+  // "Priya, 9876543210, Meerut" must not become a location.
+  // Leading correction words ("Actually Noida") are stripped; pure
+  // corrections ("No", "change") reduce to nothing.
   const CORRECTION = new Set(['no', 'nope', 'nahi', 'nahin', 'actually', 'wait', 'change', 'modify', 'edit', 'update', 'correct', 'wrong', 'galat', 'cancel', 'stop']);
+  const detectedName = extractNameFromText(text);
+  const nameWords = detectedName ? new Set(detectedName.toLowerCase().split(/\s+/)) : new Set();
   const segments = text.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
-  for (const seg of segments) {
+  for (let si = 0; si < segments.length; si++) {
+    const seg = segments[si];
+    // If the next segment is a phone number, this segment is a name, not a
+    // place — check BEFORE stripping "se"/"mein" so "Tarun Sagar se, 985..."
+    // is correctly treated as name+phone, not location.
+    if (si + 1 < segments.length) {
+      const nextDigits = segments[si + 1].replace(/\D/g, '');
+      if (nextDigits.length >= 10 && /^[6-9]/.test(nextDigits)) continue;
+    }
     let segTokens = seg.toLowerCase().replace(/[.,!?;:'"()]/g, ' ').split(/\s+/).filter(Boolean);
     while (segTokens.length && CORRECTION.has(segTokens[0])) segTokens = segTokens.slice(1);
+    while (segTokens.length > 1 && PREP.has(segTokens[segTokens.length - 1])) segTokens = segTokens.slice(0, -1);
     if (segTokens.length < 1 || segTokens.length > 2) continue;
     const joined = segTokens.join(' ');
     if (segTokens.some((t) => /^\d/.test(t) || NOT_PLACE.has(t) || GLUE_WORDS.has(t) || BE.has(t) || PREP.has(t) || SWALLOWED.has(t) || HEAD.has(t))) continue;
+    if (segTokens.some((t) => nameWords.has(t))) continue; // it's a name, not a place
     const tLower = joined.toLowerCase();
-    if (/(tomato|tomatoes|tamatar|potato|potatoes|aloo|onion|onions|pyaaz|pyaz|wheat|gehun|gehu|rice|chawal|cauliflower|gobhi|cabbage|carrot|gajar|peas|matar|apple|seb|banana|kela|mango|aam)/.test(tLower)) continue; // it's a crop, not a place
+    if (PRODUCT_WORDS.has(tLower) || tLower.split(/\s+/).some(w => PRODUCT_WORDS.has(w)) || /(tomato|tamatar|potato|aloo|onion|pyaaz|wheat|gehun|rice|chawal|cauliflower|gobhi|cabbage|carrot|gajar|peas|matar|apple|seb|banana|kela|mango|aam)/.test(tLower)) continue; // it's a crop, not a place
     return segTokens.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(' ');
   }
 
@@ -355,11 +421,91 @@ const extractNameFromText = (text: string): string | null => {
       }
     }
   }
+
+  // Bare-name fallback for comma-separated lists: "Priya, 9876543210, Meerut"
+  // A standalone 1-word segment followed by a phone number is a name, not a
+  // location. This prevents names from being mistakenly extracted as locations
+  // by detectLocation's comma-segment logic.
+  const segments = text.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i];
+    const nextSeg = segments[i + 1];
+    // Check if next segment is a phone number (10+ digits, starts with 6-9)
+    const nextDigits = nextSeg.replace(/\D/g, '');
+    const isNextPhone = nextDigits.length >= 10 && /^[6-9]/.test(nextDigits);
+    if (!isNextPhone) continue;
+    // Current segment must be a clean 1-2 word proper noun
+    const cleaned = seg.replace(/[.,!?;:'"()]/g, '').trim();
+    const cleanedLower = cleaned.toLowerCase();
+    if (cleaned.length < 2 || cleaned.length > 20) continue;
+    if (/\d/.test(cleaned)) continue;
+    if (PRODUCT_FILLERS.has(cleanedLower) || GLUE_WORDS.has(cleanedLower)) continue;
+    if (/^(kg|kilo|tonne|ton|quintal|litre|piece|bag|dozen|rupaye|rupee|rs|per|kimat|rate|daam|bhav)$/.test(cleanedLower)) continue;
+    if (looksLikeCleanValue(cleaned, 2)) {
+      return titleCase(cleaned);
+    }
+  }
+
   return null;
 };
 
+const WORD_TO_DIGIT: Record<string, string> = {
+  'zero': '0', 'oh': '0', 'o': '0',
+  'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
+  'shunya': '0', 'sunya': '0', 'shuniya': '0', 'suniya': '0', 'shuny': '0',
+  'ek': '1', 'aek': '1',
+  'do': '2',
+  'teen': '3',
+  'chaar': '4', 'char': '4',
+  'paanch': '5', 'panch': '5', 'paach': '5',
+  'chhah': '6', 'chheh': '6', 'chhe': '6', 'cheh': '6', 'chah': '6', 'che': '6', 'chhay': '6',
+  'saat': '7', 'saath': '7', 'sath': '7',
+  'aath': '8', 'ath': '8', 'aat': '8',
+  'nau': '9', 'nao': '9', 'nav': '9',
+  'शून्य': '0', 'एक': '1', 'दो': '2', 'तीन': '3', 'चार': '4', 'पाँच': '5', 'पांच': '5', 'छह': '6', 'छः': '6', 'सात': '7', 'आठ': '8', 'नौ': '9',
+  '०': '0', '१': '1', '२': '2', '३': '3', '४': '4', '५': '5', '६': '6', '७': '7', '८': '8', '९': '9',
+};
+
+const normalizePhoneDigits = (digits: string): string | null => {
+  let d = String(digits).replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  if (d.length === 10 && /^[6-9]/.test(d)) return d;
+  return null;
+};
+
+const extractPhoneFromWords = (text: string): string | null => {
+  if (!text || typeof text !== 'string') return null;
+  const lower = text.toLowerCase();
+  const tokens = lower.replace(/[^a-z0-9\u0900-\u097F]+/g, ' ').split(/\s+/).filter(Boolean);
+  let currentSeq = '';
+  let best: string | null = null;
+  const flush = (): boolean => {
+    if (currentSeq.length >= 10) {
+      for (let s = 0; s <= currentSeq.length - 10; s++) {
+        const win = currentSeq.slice(s, s + 10);
+        if (/^[6-9]/.test(win)) { best = win; return true; }
+      }
+      const norm = normalizePhoneDigits(currentSeq);
+      if (norm) { best = norm; return true; }
+    }
+    return false;
+  };
+  for (const tok of tokens) {
+    const d = WORD_TO_DIGIT[tok];
+    if (d !== undefined) {
+      currentSeq += d;
+    } else {
+      if (flush()) break;
+      currentSeq = '';
+    }
+  }
+  if (!best) flush();
+  return best;
+};
+
 const extractPhoneFromText = (text: string): string | null => {
-  const cleaned = text.replace(/[\s\-()\.]/g, '');
+  const cleaned = text.replace(/[\s\-\(\)\.]/g, '');
   let m = cleaned.match(/(?:^|\D)([6-9]\d{9})(?:\D|$)/);
   if (m) return m[1];
   m = cleaned.match(/(?:^|\D)(0[6-9]\d{9})(?:\D|$)/);
@@ -371,6 +517,18 @@ const extractPhoneFromText = (text: string): string | null => {
     const combined = m[1] + m[2];
     if (/^[6-9]/.test(combined)) return combined;
   }
+  const devDigits = text.replace(/[^०-९]/g, '');
+  if (devDigits.length >= 10) {
+    const ascii = devDigits.split('').map(ch => WORD_TO_DIGIT[ch] || '').join('');
+    const norm = normalizePhoneDigits(ascii);
+    if (norm) return norm;
+    for (let s = 0; s <= ascii.length - 10; s++) {
+      const win = ascii.slice(s, s + 10);
+      if (/^[6-9]/.test(win)) return win;
+    }
+  }
+  const fromWords = extractPhoneFromWords(text);
+  if (fromWords) return fromWords;
   return null;
 };
 
@@ -398,5 +556,6 @@ export {
   extractPhoneFromText,
   extractStandaloneNumber,
   isBareProductUtterance,
+  isKnownCrop,
   looksLikeCleanValue,
 };

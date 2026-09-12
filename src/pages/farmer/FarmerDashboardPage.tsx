@@ -50,7 +50,6 @@ export const FarmerDashboardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as SellerTab) || 'my-produce';
   const [activeTab, setActiveTab] = useState<SellerTab>(['my-produce','add-produce','inventory','buyer-requests','orders','earnings','demand'].includes(initialTab) ? initialTab : 'my-produce');
-  const [refreshKey, setRefreshKey] = useState(0);
   const [searchMyProduce, setSearchMyProduce] = useState('');
   const [editingProduce, setEditingProduce] = useState<Produce | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -82,17 +81,21 @@ export const FarmerDashboardPage: React.FC = () => {
     setSearchParams({ tab });
   };
 
-  // Subscribe to inventory updates for immediate refresh
+  // Freshly read produce from localStorage on every mount AND whenever the
+  // inventory fires an update event (add/edit/delete/voice-submit).
+  const [myProduce, setMyProduce] = useState<Produce[]>(() =>
+    farmerInventoryService.getMyProduce(CURRENT_FARMER_ID),
+  );
+
+  // Re-read on mount (catches data written while this page was unmounted,
+  // e.g. voice submissions on /farmer/voice) and subscribe to live updates.
   useEffect(() => {
-    const unsub = farmerInventoryService.subscribe(() => setRefreshKey((k) => k + 1));
+    setMyProduce(farmerInventoryService.getMyProduce(CURRENT_FARMER_ID));
+    const unsub = farmerInventoryService.subscribe(() =>
+      setMyProduce(farmerInventoryService.getMyProduce(CURRENT_FARMER_ID)),
+    );
     return unsub;
   }, []);
-
-  const myProduce = useMemo(() => {
-    // refreshKey forces recompute
-    void refreshKey;
-    return farmerInventoryService.getMyProduce(CURRENT_FARMER_ID);
-  }, [refreshKey]);
 
   const filteredMyProduce = useMemo(() => {
     if (!searchMyProduce.trim()) return myProduce;
@@ -406,7 +409,7 @@ export const FarmerDashboardPage: React.FC = () => {
             <AddProduceForm
               onSuccess={() => {
                 handleTabChange('my-produce');
-                setRefreshKey((k) => k + 1);
+                setMyProduce(farmerInventoryService.getMyProduce(CURRENT_FARMER_ID));
               }}
             />
             <Card className="mt-4 p-4 bg-slate-50 border-slate-200">

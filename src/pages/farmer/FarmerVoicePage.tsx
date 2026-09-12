@@ -33,7 +33,7 @@ export const FarmerVoicePage: React.FC = () => {
       <VoiceAssistant
         mode="farmer"
         onParsedResult={handleParsedResult}
-        onProceed={() => navigate('/farmer/buyers')}
+        onProceed={() => navigate('/farmer')}
       />
 
       <Card className="bg-white border-slate-200 p-5">

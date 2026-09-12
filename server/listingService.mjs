@@ -17,6 +17,19 @@ function generateListingId() {
 function validateListing(data) {
   const errors = [];
 
+  console.log('[SERVER VALIDATE] Input data keys:', Object.keys(data));
+  console.log('[SERVER VALIDATE] farmer_name:', JSON.stringify(data.farmer_name), 'type:', typeof data.farmer_name);
+  console.log('[SERVER VALIDATE] phone:', JSON.stringify(data.phone), 'type:', typeof data.phone);
+  console.log('[SERVER VALIDATE] product:', JSON.stringify(data.product), 'type:', typeof data.product);
+  console.log('[SERVER VALIDATE] quantity:', JSON.stringify(data.quantity), 'type:', typeof data.quantity);
+  console.log('[SERVER VALIDATE] unit:', JSON.stringify(data.unit), 'type:', typeof data.unit);
+  console.log('[SERVER VALIDATE] asking_price:', JSON.stringify(data.asking_price), 'type:', typeof data.asking_price);
+  console.log('[SERVER VALIDATE] price_unit:', JSON.stringify(data.price_unit), 'type:', typeof data.price_unit);
+  console.log('[SERVER VALIDATE] location:', JSON.stringify(data.location), 'type:', typeof data.location);
+  console.log('[SERVER VALIDATE] quality:', JSON.stringify(data.quality), 'type:', typeof data.quality);
+  console.log('[SERVER VALIDATE] intent:', JSON.stringify(data.intent), 'type:', typeof data.intent);
+  console.log('[SERVER VALIDATE] source:', JSON.stringify(data.source), 'type:', typeof data.source);
+
   if (!data.farmer_name || typeof data.farmer_name !== 'string' || data.farmer_name.trim().length === 0) {
     errors.push('farmer_name is required and must be a non-empty string');
   }

@@ -24,6 +24,7 @@ import type { ProcessTurnResult, SubmitListingResult, FinalListing } from '../..
 import type { ListingData } from '../../services/conversationManager';
 import { parseVoiceIntent } from '../../services/aiService';
 import type { ParsedVoiceIntent } from '../../services/aiService';
+import { farmerInventoryService } from '../../services/farmerInventoryService';
 
 // Transport-agnostic core — no browser APIs, no UI logic.
 const voiceAgent = createVoiceAgent();
@@ -76,7 +77,10 @@ const getPreferredVoice = (lang: 'hi' | 'en'): SpeechSynthesisVoice | null => {
 
 export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedResult, onProceed }) => {
   const { language, setParsedIntent, setAssistantResponse, setLastSpokenText } = useDemo();
-  void onProceed;
+  // Reuse the existing page-level flow (farmer: /farmer/buyers, consumer: /consumer/matches).
+  // No duplicate pages — on success we POST once then delegate navigation to onProceed.
+  const onProceedRef = useRef(onProceed);
+  useEffect(() => { onProceedRef.current = onProceed; }, [onProceed]);
 
   const [phase, setPhase] = useState<AssistantPhase>('idle');
   const [transcript, setTranscript] = useState('');
@@ -100,6 +104,11 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   const interimRef = useRef<string>('');
   const silenceTimeoutRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
+  // Exactly-once POST guards: duplicate speech events, re-renders, or double
+  // "Haan" taps must not create more than ONE listing per session.
+  const submitInProgressRef = useRef(false);
+  const submittedSessionRef = useRef<Map<string, string>>(new Map());
+  const navigatedSessionRef = useRef<Set<string>>(new Set());
   const sessionIdRef = useRef<string>(sessionId);
   // Mirrors of isSpeaking/phase so recognition callbacks (created once per
   // listening session) can check the CURRENT values synchronously.
@@ -218,7 +227,11 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   }, [clearSilenceTimeout]);
 
   const handleResetSession = useCallback(() => {
-    voiceAgent.resetSession(sessionIdRef.current);
+    const oldSid = sessionIdRef.current;
+    voiceAgent.resetSession(oldSid);
+    submittedSessionRef.current.delete(oldSid);
+    navigatedSessionRef.current.delete(oldSid);
+    submitInProgressRef.current = false;
     const newSid = voiceAgent.createSession();
     setSessionId(newSid);
     sessionIdRef.current = newSid;
@@ -236,9 +249,53 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     setSubmitting(false);
   }, []);
 
-  // ---- CONVERSATION MANAGER (new backend /api/conversation/turn) ----
+  // ---- FINAL CONFIRMATION FLOW (single-stage per spec) ----
+  // YES → POST current listing to /api/listings exactly ONCE, preserve
+  // listing_id, navigate to the EXISTING page flow via onProceed, ask nothing else.
+  // NO → never POST; show "Kya change karna hai?" or the updated summary.
+  const submitSuccessOnce = useCallback(async (sid: string) => {
+    const cached = submittedSessionRef.current.get(sid);
+    if (cached) return { success: true as const, listing_id: cached, status: 'created' };
+    if (submitInProgressRef.current) {
+      // voiceAgentCore dedupes the in-flight POST; reuse it instead of firing again.
+      return voiceAgent.submitToApi(sid);
+    }
+    submitInProgressRef.current = true;
+    setSubmitting(true);
+    try {
+      const res = await voiceAgent.submitToApi(sid);
+      if (res.success && res.listing_id) {
+        submittedSessionRef.current.set(sid, res.listing_id);
+        setListingId(res.listing_id);
+      }
+      return res;
+    } finally {
+      submitInProgressRef.current = false;
+      setSubmitting(false);
+    }
+  }, []);
+
+  const navigateAfterSuccess = useCallback((sid: string) => {
+    if (navigatedSessionRef.current.has(sid)) return;
+    navigatedSessionRef.current.add(sid);
+    // Reuse the existing host-page flow (FarmerVoicePage → /farmer/buyers).
+    // No duplicate pages; no extra questions after approval.
+    try {
+      onProceedRef.current?.();
+    } catch (e) {
+      console.warn('[FRONTEND] onProceed navigation failed', e);
+    }
+  }, []);
+
   const handleConfirm = useCallback(async (confirm: boolean) => {
-    if (isProcessingRef.current) return;
+    if (isProcessingRef.current || submitInProgressRef.current) return;
+    // Duplicate YES after an already-submitted session: preserve listing_id,
+    // do not re-POST, just ensure navigation happened once.
+    const alreadySubmitted = submittedSessionRef.current.get(sessionIdRef.current);
+    if (confirm && alreadySubmitted) {
+      navigateAfterSuccess(sessionIdRef.current);
+      return;
+    }
     isProcessingRef.current = true;
     setSubmitting(true);
     setError(null);
@@ -263,26 +320,52 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       setResponse(result.agent_message);
       setAssistantResponse(result.agent_message);
 
-      if (result.state === 'SUCCESS') {
-        // Server already submitted the listing to POST /api/listings.
-        // Display the result directly — no redundant API call.
-        const final = buildFinalListing(result.listing);
-        setFinalListing(final);
-        setConvState('SUCCESS');
-        if (result.listing_id) {
-          setListingId(result.listing_id);
-        }
-        console.log('[FRONTEND] Listing submitted by server. ID:', result.listing_id);
-        setResultSummary(
-          result.listing_id
-            ? (language === 'hi'
-                ? `लिस्टिंग ID: ${result.listing_id} — सफलता!`
-                : `Listing ID: ${result.listing_id} — Success!`)
-            : null
-        );
-        setPhase('speaking');
-        speak(result.agent_message);
-        return;
+        if (result.state === 'SUCCESS') {
+          const final = buildFinalListing(result.listing);
+          setFinalListing(final);
+          setConvState('SUCCESS');
+
+          // The API was already called during processTurn/confirmListing.
+          // Use the authoritative listing_id from the response.
+          let resolvedListingId = result.listing_id;
+
+          // Fallback: if listing_id is not yet present, submit now (safety net).
+          if (!resolvedListingId) {
+            const sub = await submitSuccessOnce(result.session_id);
+            if (sub.success && sub.listing_id) {
+              resolvedListingId = sub.listing_id;
+            } else {
+              handleError('submit-failed', sub.error || 'Listing banane mein samasya aayi. Dobara koshish karein.', sub.error);
+              return;
+            }
+          }
+
+          console.log('[FRONTEND] Listing created. ID:', resolvedListingId);
+
+          // Persist to localStorage so My Produce page shows it immediately.
+          // Do NOT navigate if persistence fails.
+          try {
+            farmerInventoryService.addVoiceListing({ ...result.listing, listing_id: resolvedListingId });
+          } catch (e: any) {
+            console.error('[FRONTEND] Inventory persistence failed:', e);
+            handleError('inventory-failed',
+              language === 'hi'
+                ? 'Listing API pe ban gayi lekin localStorage mein save nahi ho payi.'
+                : 'Listing was created via API but could not be saved locally.',
+              String(e)
+            );
+            return;
+          }
+
+          setResultSummary(
+            language === 'hi'
+              ? `लिस्टिंग ID: ${resolvedListingId} — सफलता!`
+              : `Listing ID: ${resolvedListingId} — Success!`
+          );
+          setPhase('speaking');
+          speak(result.agent_message);
+          navigateAfterSuccess(result.session_id);
+          return;
       } else if (result.state === 'CANCELLED') {
         setFinalListing(null);
         setListingId(null);
@@ -290,6 +373,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setPhase('speaking');
         speak(result.agent_message);
       } else {
+        // NO → correction path ("Kya change karna hai?" or updated summary). No POST.
         setPhase('speaking');
         speak(result.agent_message);
       }
@@ -303,7 +387,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       isProcessingRef.current = false;
       setSubmitting(false);
     }
-  }, [language, setAssistantResponse, setLastSpokenText, speak, handleError]);
+  }, [language, setAssistantResponse, setLastSpokenText, speak, handleError, submitSuccessOnce, navigateAfterSuccess]);
 
   const processTranscript = useCallback(
     async (text: string) => {
@@ -321,9 +405,23 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         return;
       }
 
-      if (isProcessingRef.current) {
+      if (isProcessingRef.current || submitInProgressRef.current) {
         console.log('[FRONTEND] request already in progress, ignoring duplicate:', trimmed);
         return;
+      }
+      // Duplicate YES after submit: preserve listing_id, do not re-POST.
+      if (submittedSessionRef.current.get(sessionIdRef.current)) {
+        const sid = sessionIdRef.current;
+        try {
+          const dup = await voiceAgent.processTurn(sid, trimmed);
+          if (dup.state === 'SUCCESS') {
+            setConvResult(dup);
+            setConvState('SUCCESS');
+            navigateAfterSuccess(sid);
+            return;
+          }
+        } catch {}
+        // Fall through to normal handling if not a duplicate approval.
       }
       isProcessingRef.current = true;
       console.log('[FRONTEND] request started with text:', trimmed, 'session', sessionIdRef.current);
@@ -375,6 +473,50 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setResponse(result.agent_message);
         setAssistantResponse(result.agent_message);
         setLastSpokenText(trimmed);
+
+        if (result.state === 'SUCCESS') {
+          // Voice YES ("Haan") reached SUCCESS — listing already submitted via API.
+          const final = buildFinalListing(result.listing);
+          setFinalListing(final);
+
+          let resolvedListingId = result.listing_id;
+
+          // Fallback: if listing_id is not yet present, submit now.
+          if (!resolvedListingId) {
+            const sub = await submitSuccessOnce(result.session_id);
+            if (sub.success && sub.listing_id) {
+              resolvedListingId = sub.listing_id;
+            } else {
+              handleError('submit-failed', sub.error || 'Listing banane mein samasya aayi. Dobara koshish karein.', sub.error);
+              return;
+            }
+          }
+
+          // Persist to localStorage — do NOT navigate if this fails.
+          try {
+            farmerInventoryService.addVoiceListing({ ...result.listing, listing_id: resolvedListingId });
+          } catch (e: any) {
+            console.error('[FRONTEND] Inventory persistence failed:', e);
+            handleError('inventory-failed',
+              language === 'hi'
+                ? 'Listing API pe ban gayi lekin localStorage mein save nahi ho payi.'
+                : 'Listing was created via API but could not be saved locally.',
+              String(e)
+            );
+            return;
+          }
+
+          setResultSummary(
+            language === 'hi'
+              ? `लिस्टिंग ID: ${resolvedListingId} — सफलता!`
+              : `Listing ID: ${resolvedListingId} — Success!`
+          );
+          setPhase('speaking');
+          speak(result.agent_message);
+          navigateAfterSuccess(result.session_id);
+          return;
+        }
+
         setPhase('speaking');
         speak(result.agent_message);
 
@@ -397,7 +539,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         isProcessingRef.current = false;
       }
     },
-    [language, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak, handleError]
+    [language, onParsedResult, setAssistantResponse, setLastSpokenText, setParsedIntent, speak, handleError, submitSuccessOnce, navigateAfterSuccess]
   );
 
   const stopListening = useCallback(() => {

@@ -22,6 +22,7 @@ import {
   extractPhoneFromText,
   extractStandaloneNumber,
   isBareProductUtterance,
+  isKnownCrop,
   looksLikeCleanValue,
 } from './listingParser.ts';
 
@@ -60,12 +61,14 @@ export interface ConversationSession {
   id: string;
   state: ConversationState;
   listing: ListingData;
+  listing_id?: string;
   turns: ConversationTurn[];
   language: 'hi' | 'hinglish' | 'en';
   last_asked: string | null;
   quality_asked: boolean;
   last_echo_field: string | null;
   greeted: boolean;
+  confirmation_stage: 'changes' | null;
   created_at: number;
   updated_at: number;
 }
@@ -110,7 +113,7 @@ const EMPTY_LISTING: ListingData = {
 
 const PRODUCT_SAY: Record<string, { hi: string; en: string }> = {
   Tomato: { hi: 'tamatar', en: 'tomatoes' },
-  Potato: { hi: 'aloo', en: 'potatoes' },
+  Potato: { hi: 'aalu', en: 'potatoes' },
   Onion: { hi: 'pyaaz', en: 'onions' },
   Wheat: { hi: 'gehun', en: 'wheat' },
   Rice: { hi: 'chawal', en: 'rice' },
@@ -156,8 +159,8 @@ const numberToHindiWords = (n: number, language: string = 'hinglish'): string =>
   const onesHing = ['', 'ek', 'do', 'teen', 'chaar', 'paanch', 'chhe', 'saat', 'aath', 'nau',
     'das', 'gyaarah', 'baarah', 'terah', 'chaudah', 'pandrah', 'solah', 'satrah', 'athaarah', 'unnis'];
 
-  const tensDev = ['', '', 'बीस', 'तीस', 'चालिस', 'पचास', 'साठ', 'सत्तर', 'अस्सी', 'नब्बे'];
-  const tensHing = ['', '', 'bees', 'tees', 'chhees', 'pachaas', 'saath', 'sattar', 'assi', 'nabbe'];
+  const tensDev = ['', '', 'बीस', 'तीस', 'चालीस', 'पचास', 'साठ', 'सत्तर', 'अस्सी', 'नब्बे'];
+  const tensHing = ['', '', 'bees', 'tees', 'chalis', 'pachaas', 'saath', 'sattar', 'assi', 'nabbe'];
 
   const hundredsDev = ['', 'एक सौ', 'दो सौ', 'तीन सौ', 'चार सौ', 'पाँच सौ', 'छह सौ', 'सात सौ', 'आठ सौ', 'नौ सौ'];
   const hundredsHing = ['', 'ek sau', 'do sau', 'teen sau', 'chaar sau', 'paanch sau', 'chhe sau', 'saat sau', 'aath sau', 'nau sau'];
@@ -284,8 +287,10 @@ const generateChangeQuestion = (field: string, language: string): string => {
 const sayProduct = (product: string | null, language: string): string => {
   if (!product) return isHiLang(language) ? 'saman' : 'produce';
   const map = PRODUCT_SAY[product];
-  if (map) return isHiLang(language) && language === 'hi' ? map.hi : map.en;
-  // Unknown product — use it as-is (title-cased by extraction).
+  // For Hindi/Hinglish, always use Hindi product name (e.g., Potato → aalu)
+  // Dynamically for ALL products without hardcoding user data.
+  if (map) return isHiLang(language) ? map.hi : map.en;
+  // Unknown product — use it as-is (title-cased by extraction), dynamically.
   return String(product);
 };
 
@@ -350,7 +355,8 @@ const mergeListing = (existing: ListingData, extracted: Partial<ListingData>): L
   for (const key of Object.keys(extracted) as (keyof ListingData)[]) {
     const value = extracted[key];
     if (value !== null && value !== undefined) {
-      (merged as Record<string, unknown>)[key] = value;
+      // Empty string signals "clear this field" (e.g., name matched as product).
+      (merged as Record<string, unknown>)[key] = value === '' ? null : value;
     }
   }
   // price_unit always follows asking_price when not explicitly given.
@@ -411,32 +417,29 @@ const generateQuestion = (field: string, language: string, listing?: ListingData
   return questions[field] || 'Please tell me a bit more.';
 };
 
-const generateConfirmation = (listing: ListingData, language: string): string => {
-  const product = sayProduct(listing.product, language);
-  const qty = sayQty(listing, language) || (isHiLang(language) ? 'kuch' : 'some');
-  const price = sayPrice(listing, language);
-  const place = listing.location || (isHiLang(language) ? 'aapke gaon' : 'your place');
-  const name = listing.farmer_name;
-  const phone = sayPhone(listing.phone);
-  const quality = listing.quality ? `${listing.quality} ` : '';
-
-  if (isHiLang(language)) {
-    let msg = `Ek baar check kar lo. Aap ${qty} ${quality}${product} bechna chahte hain`;
-    if (price) msg += `, ${price}`;
-    msg += `, ${place} se.`;
-    if (name) msg += ` Naam ${name}.`;
-    if (phone) msg += ` Number ${phone}.`;
-    msg += ' Sab theek hai?';
-    return msg;
-  }
-
-  let msg = `Please check once. You want to sell ${qty} of ${quality}${product}`;
-  if (price) msg += ` at ${price}`;
-  msg += ` from ${place}.`;
-  if (name) msg += ` Name ${name}.`;
-  if (phone) msg += ` Number ${phone}.`;
-  msg += ' Is that right?';
-  return msg;
+const generateConfirmation = (listing: ListingData, _language: string): string => {
+  // Single-stage final summary per spec — ONE complete dynamic listing.
+  // Every value comes from the collected listing; nothing is hardcoded.
+  const name = listing.farmer_name ?? '-';
+  const phone = listing.phone ?? '-';
+  const product = listing.product ?? '-';
+  const qty = listing.quantity ?? '-';
+  const unit = listing.unit ?? '-';
+  const price = listing.asking_price ?? '-';
+  const priceUnit = listing.price_unit ?? '-';
+  const place = listing.location ?? '-';
+  const quality = listing.quality ?? '-';
+  return (
+    `Yeh aapki listing ki details hain:\n` +
+    `Naam: ${name}\n` +
+    `Phone: ${phone}\n` +
+    `Product: ${product}\n` +
+    `Quantity: ${qty} ${unit}\n` +
+    `Price: ₹${price}/${priceUnit}\n` +
+    `Location: ${place}\n` +
+    `Quality: ${quality}\n\n` +
+    `Sab theek hai?`
+  );
 };
 
 const isUnusableTurn = (extracted: Partial<ListingData>) => !hasExtractedData(extracted);
@@ -554,11 +557,27 @@ const buildAskMessage = (
   nextField: string,
   language: string
 ): string => {
+  // Defensive: NEVER re-ask for a field already captured, including name/phone.
+  // If nextField is already filled in listing, find the next truly missing field.
+  if (nextField && (listing as Record<string, unknown>)[nextField] !== null && (listing as Record<string, unknown>)[nextField] !== undefined) {
+    const missing = getMissingRequiredFields(listing);
+    if (missing.length === 0) {
+      return isHiLang(language) ? 'Sab theek hai!' : 'All fields are complete!';
+    }
+    const order = ['product', 'quantity', 'asking_price', 'quality', 'location', 'farmer_name', 'phone'];
+    for (const f of order) {
+      if (missing.includes(f)) {
+        return buildAskMessage(listing, extracted, prevListing, f, language);
+      }
+    }
+    return buildAskMessage(listing, extracted, prevListing, missing[0], language);
+  }
   // Unclear answer to the previous question: gently re-ask, don't skip ahead.
+  // But if the answer is unusable and we already have phone/name, don't loop on them.
   if (extracted && isUnusableTurn(extracted)) {
     return isHiLang(language)
-      ? `Maaf kijiye, samajh nahi aaya. ${generateQuestion(nextField, language)}`
-      : `Sorry, I didn't catch that. ${generateQuestion(nextField, language)}`;
+      ? `Maaf kijiye, samajh nahi aaya. ${generateQuestion(nextField, language, listing)}`
+      : `Sorry, I didn't catch that. ${generateQuestion(nextField, language, listing)}`;
   }
   const echo = generateEcho(listing, extracted, prevListing, language);
   const question = generateQuestion(nextField, language, listing);
@@ -569,12 +588,21 @@ const isConfirmationAffirmative = (text: string): boolean => {
   const lower = text.toLowerCase().trim().replace(/[.,!?]/g, '');
   if (/^haan\s+(lekin|par|but|however)/i.test(lower)) return false;
   if (/^(no|nahi|nahin|cancel|ruk|stop)/i.test(lower)) return false;
+  // A correction hidden behind "haan" (e.g. "haan, price change") is NOT approval.
+  if (
+    lower !== 'correct' &&
+    lower !== 'sahi' &&
+    lower !== 'theek' &&
+    /\b(badal|badalna|badalni|change|modify|galat|wrong|actually|wait|lekin|but|edit|update|fix)\b/i.test(lower)
+  )
+    return false;
   return (
-    /^(haan|ha|yes|yep|yup|ji haan|bilkul|correct|sahi|theek|ok|okay|ji|haanji|confirm|create|banado|bana do|\+|y)(?:\s|$)/i.test(
+    /^(haan|haanji|ha|yes|yep|yup|ji\s*haan|bilkul|correct|sahi|theek|ok|okay|ji|confirm|create|banado|bana\s*do|y)(?:\s|$)/i.test(
       lower
     ) ||
-    /^(sab|all|everything)\s+(sahi|theek|correct)/i.test(lower) ||
-    /^(yes\s+please|ji\s+bilkul)/i.test(lower)
+    /^(sab|all|everything)\s+(sahi|theek|correct|right|good|badhiya)/i.test(lower) ||
+    /^(yes\s+please|ji\s+bilkul|bilkul\s+(sahi|theek)|sab\s+theek\s+hai)/i.test(lower) ||
+    /^(theek\s+hai|sahi\s+hai|sab\s+sahi\s+hai)$/i.test(lower)
   );
 };
 
@@ -583,6 +611,7 @@ const isConfirmationNegative = (text: string): boolean => {
   if (isConfirmationCancelled(text)) return false;
   return (
     /^(nahi|nahin|no|nope|wrong|galat|change|modify|badal|edit)/i.test(lower) ||
+    /^not\s+(correct|right)/i.test(lower) ||
     /^(kuch|something|ye|yeh|wo|woh)\s+(change|badal|edit|modify)/i.test(lower) ||
     /^(change|modify|badal|edit)\s+(karna|kar)/i.test(lower)
   );
@@ -596,9 +625,9 @@ const isConfirmationCancelled = (text: string): boolean => {
   );
 };
 
-// Detect bare "no change" responses during confirmation.
-// "Nahi" alone, or "nahi, sab theek hai", "nahi sab sahi hai" etc. — all mean
-// the listing is correct as-is and should be submitted immediately.
+// Deprecated under the single-stage spec: bare "Nahi" means the farmer wants a
+// change (do NOT submit). Kept exported for backwards compatibility; the
+// CONFIRMING flow no longer treats any "nahi..." variant as approval.
 const isBareNoChangeResponse = (text: string): boolean => {
   const lower = text.toLowerCase().trim().replace(/[.,!?]/g, '');
   return /^(nahi|nahin|no|nope)$/i.test(lower) ||
@@ -626,6 +655,27 @@ const applyBareNumberAndCorrections = (
   const hasPriceWord = /(rupaye|rupee|rs\b|₹|per\s*kilo|per\s*kg|रुपये)/.test(lower);
   const asked = session.last_asked;
   const standalone = extractStandaloneNumber(text);
+
+  // Phone numbers must never be mistaken for quantity/price.
+  const isPhoneLike = standalone != null && (() => {
+    const s = String(standalone).replace(/\D/g, '');
+    return s.length >= 10 && /^[6-9]/.test(s);
+  })();
+  if (isPhoneLike) {
+    if (extracted.phone == null) {
+      const s = String(standalone).replace(/\D/g, '');
+      let d = s;
+      if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+      if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+      if (d.length === 10 && /^[6-9]/.test(d)) {
+        extracted.phone = d;
+        return;
+      }
+    }
+    if (!hasQtyWord && !hasPriceWord) {
+      return;
+    }
+  }
 
   if (extracted.quantity == null && hasQtyWord && standalone != null && !hasPriceWord) {
     extracted.quantity = standalone;
@@ -683,11 +733,15 @@ const applyBareNumberAndCorrections = (
 const parseQualityAnswer = (text: string): string | null => {
   const grade = parseGrade(text);
   if (grade) return grade;
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
+  // Never treat greetings as quality — prevents "Namaste" → quality "Namaste"
+  if (['namaste','namaste ji','namaskar','namaskar ji','hello','hi','hey','hii'].includes(lower)) return null;
   if (/\b(achha|achhi|achi|accha|achiya|badhiya|badiya|good|best)\b/.test(lower)) return 'Good';
   if (/\b(theek|thik|average|normal|medium|ok)\b/.test(lower)) return 'Average';
   if (/\b(kharab|bekar|poor|bad)\b/.test(lower)) return 'Poor';
   const trimmed = text.trim().replace(/[.,!?;:'"()]/g, '');
+  const lower2 = trimmed.toLowerCase();
+  if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(lower2)) return null;
   // Reject conversational dodges like "aap batado" / "pata nahi" — they are
   // not quality descriptors and must not be invented into the listing.
   const isDodge =
@@ -716,8 +770,9 @@ const applySlotFallbacks = (
     const lower = trimmed.toLowerCase();
     // Strip correction prefix to get the bare name
     const stripped = lower.replace(/^(nahi|nahin|no|nope|galat|wrong|wait|actually)[,\s]*/i, '').trim();
+    if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(stripped)) return;
     const hasNonNameWords =
-      /\b(se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile|price|kimat|rate|quality|grade|location|address|gaon|village|shehar|city|jagah)\b/.test(
+      /\b(namaste|namaskar|se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile|price|kimat|rate|quality|grade|location|address|gaon|village|shehar|city|jagah)\b/.test(
         stripped
       );
     if (stripped.length >= 2 && stripped.length <= 20 && !/\d/.test(stripped) && !hasNonNameWords) {
@@ -736,8 +791,9 @@ const applySlotFallbacks = (
   if (nextField === 'farmer_name' && !extracted.farmer_name) {
     const trimmed = text.trim().replace(/[.,!?;:'"()]/g, '');
     const lower = trimmed.toLowerCase();
+    if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(lower)) return;
     const hasNonNameWords =
-      /\b(se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile)\b/.test(
+      /\b(namaste|namaskar|se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile)\b/.test(
         lower
       );
     if (
@@ -757,6 +813,9 @@ const applySlotFallbacks = (
       if (/^[6-9]/.test(last10)) {
         extracted.phone = last10;
       }
+    } else {
+      const fromWords = extractPhoneFromText(text);
+      if (fromWords) extracted.phone = fromWords;
     }
   }
   if (nextField === 'quality' && !extracted.quality) {
@@ -765,6 +824,9 @@ const applySlotFallbacks = (
   }
   if (nextField === 'location' && !extracted.location) {
     const trimmed = text.trim().replace(/[.,!?;:'"()]/g, '');
+    const lowerCheck = trimmed.toLowerCase();
+    // Never treat greetings as location — prevents "Namaste" → "Namaste note kar liya" / "Namaste se"
+    if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(lowerCheck)) return;
     // A bare product answer ("Gobhi") is NEVER a place name; the echo of the
     // assistant's own words ("Ji. Aap do kilo ... bechna chahte hain") is also
     // rejected by looksLikeCleanValue (glue words: do/kilo/bechna/chahte/hain).
@@ -783,6 +845,19 @@ const applySlotFallbacks = (
   }
 };
 
+// Confirmation-only repair: extractTurnData's name/location disambiguator
+// converts ANY location without "se/mein" into farmer_name when
+// last_asked !== 'location' — but CONFIRMING always has last_asked=null.
+// An explicit "location X" correction must stay a location and must never
+// overwrite the real farmer name. Cumulative state is preserved by mergeListing
+// (nulls never overwrite), so clearing the misplaced name is safe.
+const repairConfirmationFieldSwap = (text: string, extracted: Partial<ListingData>): void => {
+  if (detectChangeField(text) === 'location' && extracted.location == null && extracted.farmer_name != null) {
+    extracted.location = extracted.farmer_name;
+    extracted.farmer_name = null;
+  }
+};
+
 const extractTurnData = (text: string, session: ConversationSession): Partial<ListingData> => {
   const extracted: Partial<ListingData> = {
     product: normalizeProduct(text),
@@ -796,9 +871,52 @@ const extractTurnData = (text: string, session: ConversationSession): Partial<Li
     phone: null,
   };
 
+  // ── Context-aware field suppression ──────────────────────────────────
+  // When the system is asking for a specific field (last_asked), weak
+  // extractions for *other* fields must not overwrite already-known
+  // listing values.  A "weak" product is one that came from the open-
+  // ended extractAnyProduct fallback (not a known crop).  Known crops
+  // (Tomato, Wheat, …) carry strong evidence and are always extracted.
+  //
+  // Also suppress weak products in CONFIRMING state (last_asked is null)
+  // to prevent arbitrary words from overwriting the existing product —
+  // unless the user is explicitly correcting (e.g. "Nahi, …").
+  if (extracted.product && !isKnownCrop(extracted.product)) {
+    if (session.last_asked && session.last_asked !== 'product') {
+      (extracted as any).product = null;
+    } else if (!session.last_asked && session.state === 'CONFIRMING' && !isCorrectionText(text)) {
+      (extracted as any).product = null;
+    }
+  }
+
   applySellIntentOverride(text, extracted);
   const nameFromText = extractNameFromText(text);
-  if (nameFromText) extracted.farmer_name = nameFromText;
+  if (nameFromText) {
+    // If the extracted name is the same as the detected location, it's a
+    // false positive — the location detector is more reliable (uses grammar
+    // context like "se", "mein", "from") so clear the name, not the location.
+    if (extracted.location && extracted.location.toLowerCase() === nameFromText.toLowerCase()) {
+      // Don't set name — it's actually a place name
+    } else {
+      extracted.farmer_name = nameFromText;
+    }
+    // If product extraction mistakenly picked the name, clear it (dynamic, not hardcoded).
+    if (extracted.product && extracted.product.toLowerCase() === nameFromText.toLowerCase()) {
+      (extracted as any).product = '';
+    }
+  } else if (extracted.location && !extracted.farmer_name) {
+    // detectLocation may have classified a bare word as a location. If the
+    // system wasn't asking for location and the text has no grammar context
+    // ("se", "mein"), the word is ambiguous — treat as name instead.
+    const hasAnyPrep = /\b(se|mein|from|in|at|near|paas)\b/i.test(text);
+    if (session.last_asked !== 'location' && !hasAnyPrep) {
+      extracted.farmer_name = extracted.location;
+      extracted.location = null;
+    }
+  }
+  if (extracted.location && extracted.product && extracted.product.toLowerCase() === extracted.location.toLowerCase()) {
+    (extracted as any).product = null;
+  }
   const phoneFromText = extractPhoneFromText(text);
   if (phoneFromText) extracted.phone = phoneFromText;
   applyBareNumberAndCorrections(text, extracted, session);
@@ -824,6 +942,7 @@ const createSession = (sessionId: string): ConversationSession => {
     last_echo_field: null,
     quality_asked: false,
     greeted: false,
+    confirmation_stage: null,
     created_at: Date.now(),
     updated_at: Date.now(),
   };
@@ -840,20 +959,23 @@ const respond = (
   state: ConversationState,
   agentMessage: string,
   missing: string[],
-  nextField?: string
+  nextField?: string,
+  error?: string
 ): ConversationTurnResult => {
   return {
-    success: true,
+    success: state !== 'ERROR',
     state,
     listing: { ...session.listing },
     agent_message: agentMessage,
     missing_fields: missing,
     next_field: nextField,
     session_id: session.id,
+    listing_id: session.listing_id,
+    error,
   };
 };
 
-const processTurn = (sessionId: string, text: string): ConversationTurnResult => {
+const processTurn = async (sessionId: string, text: string): Promise<ConversationTurnResult> => {
   if (!sessionId || typeof sessionId !== 'string') {
     return {
       success: false,
@@ -884,18 +1006,24 @@ const processTurn = (sessionId: string, text: string): ConversationTurnResult =>
   pushTurn(session, 'farmer', text.trim());
 
   const prevState = session.state;
-  const language = resolveLanguage(session, text);
-  session.language = language;
+  // Hindi-only speech: always respond in Hindi (Hinglish Roman) dynamically from user data
+  const language = 'hinglish';
+  session.language = 'hinglish' as ConversationSession['language'];
 
-  // First contact with a vague opener: greet, then ask what they sell.
-  // If the farmer already starts with their produce, skip the ceremony.
+  // First contact: handle Namaste greeting naturally, without treating as data
   if (prevState === 'IDLE' && !session.greeted) {
     session.greeted = true;
+    const trimmedLower = text.trim().toLowerCase().replace(/[.,!?]/g, '');
+    if (trimmedLower === 'namaste' || trimmedLower === 'namaste ji' || trimmedLower === 'namaskar' || trimmedLower === 'namaskar ji' || trimmedLower === 'namasteji') {
+      const msg = 'Namaste ji, aap kya bechna chahte hain?';
+      session.state = 'LISTENING';
+      session.last_asked = 'product';
+      pushTurn(session, 'agent', msg);
+      return respond(session, 'LISTENING', msg, getMissingRequiredFields(session.listing), 'product');
+    }
     const firstExtracted = extractTurnData(text, session);
     if (isUnusableTurn(firstExtracted)) {
-      const msg = isHiLang(language)
-        ? 'Namaste! Main aapka saman bechne mein madad karunga. Aap kya bechna chahte hain?'
-        : "Hello! I'll help you sell your produce. What do you want to sell?";
+      const msg = 'Namaste ji, aap kya bechna chahte hain?';
       session.state = 'LISTENING';
       session.last_asked = 'product';
       pushTurn(session, 'agent', msg);
@@ -903,11 +1031,25 @@ const processTurn = (sessionId: string, text: string): ConversationTurnResult =>
     }
   }
 
+  // Duplicate protection at state level: an already-approved session stays
+  // SUCCESS. Repeated "Haan" speech events, re-renders, or retries return the
+  // same listing without resetting state or triggering another submission.
+  if (prevState === 'SUCCESS') {
+    const lastAgent = [...session.turns].reverse().find((t) => t.role === 'agent')?.text || 'Ho gaya! Aapki listing ban gayi.';
+    return respond(session, 'SUCCESS', lastAgent, []);
+  }
+
+  // Guard against re-entry while API submission is in flight.
+  if (prevState === 'SUBMITTING') {
+    return respond(session, 'SUBMITTING', 'Listing submit ho raha hai...', []);
+  }
+
   if (prevState === 'CONFIRMING') {
     if (isConfirmationCancelled(text)) {
       session.state = 'CANCELLED';
       session.listing = { ...EMPTY_LISTING };
       session.last_asked = null;
+      session.confirmation_stage = null;
       const msg = isHiLang(language)
         ? 'Theek hai, rok diya. Phir se shuru karna ho toh bataiye.'
         : 'Okay, stopped. Tell me if you want to start again.';
@@ -915,65 +1057,66 @@ const processTurn = (sessionId: string, text: string): ConversationTurnResult =>
       return respond(session, 'CANCELLED', msg, []);
     }
 
+    // YES / HAAN — single-stage final approval per spec.
+    // Submit to POST /api/listings now and return the authoritative
+    // listing_id + complete listing in the SUCCESS response.
     if (isConfirmationAffirmative(text)) {
-      // No API call in Phase 2 dev mode: locally mark the listing as complete
-      // and hand the structured data to the UI for display.
-      session.state = 'SUCCESS';
-      const qtySay = sayQty(session.listing, language);
-      const prodSay = sayProduct(session.listing.product, language);
-      const priceSay = sayPrice(session.listing, language);
-      const hiSummary = [qtySay ? `${qtySay} ${prodSay}` : null, priceSay].filter(Boolean).join(', ');
-      const enSummary = [
-        qtySay ? `${qtySay} of ${prodSay}` : null,
-        priceSay ? `at ${priceSay}` : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      const successMsg = isHiLang(language)
-        ? `Ho gaya! Aapki listing ban gayi${hiSummary ? ` - ${hiSummary}` : ''}.`
-        : `Done! Your listing is ready${enSummary ? ` - ${enSummary}` : ''}.`;
-      pushTurn(session, 'agent', successMsg);
-      return respond(session, 'SUCCESS', successMsg, []);
+      session.state = 'SUBMITTING';
+      session.confirmation_stage = null;
+      session.last_asked = null;
+      session.last_echo_field = null;
+
+      const finalListing = buildFinalListing(session.listing);
+      const apiResult = await submitListing(finalListing);
+
+      if (apiResult.success && apiResult.listing_id) {
+        session.state = 'SUCCESS';
+        session.listing_id = apiResult.listing_id;
+        const msg = 'Ho gaya! Aapki listing ban gayi.';
+        pushTurn(session, 'agent', msg);
+        return respond(session, 'SUCCESS', msg, []);
+      }
+
+      // API failed — revert to CONFIRMING so user can retry.
+      session.state = 'CONFIRMING';
+      const msg = isHiLang(language)
+        ? 'Listing banane mein samasya aayi. Dobara koshish karein.'
+        : 'There was a problem creating the listing. Please try again.';
+      pushTurn(session, 'agent', msg);
+      return respond(session, 'ERROR', msg, [], undefined, apiResult.error);
     }
 
-    if (isBareNoChangeResponse(text)) {
-      // "Nahi" / "nahi sab theek hai" during confirmation = no changes needed.
-      // Treat as affirmative and submit.
-      session.state = 'SUCCESS';
-      const qtySay = sayQty(session.listing, language);
-      const prodSay = sayProduct(session.listing.product, language);
-      const priceSay = sayPrice(session.listing, language);
-      const hiSummary = [qtySay ? `${qtySay} ${prodSay}` : null, priceSay].filter(Boolean).join(', ');
-      const enSummary = [
-        qtySay ? `${qtySay} of ${prodSay}` : null,
-        priceSay ? `at ${priceSay}` : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      const successMsg = isHiLang(language)
-        ? `Ho gaya! Aapki listing ban gayi${hiSummary ? ` - ${hiSummary}` : ''}.`
-        : `Done! Your listing is ready${enSummary ? ` - ${enSummary}` : ''}.`;
-      pushTurn(session, 'agent', successMsg);
-      return respond(session, 'SUCCESS', successMsg, []);
-    }
-
+    // NO / NAHI — never create a listing here.
     if (isConfirmationNegative(text) || isCorrectionText(text)) {
       const prevListing = { ...session.listing };
       const extracted = extractTurnData(text, session);
+      repairConfirmationFieldSwap(text, extracted);
       // Apply bare number correction with CONFIRMING context so that e.g.
       // "Nahi, 35" when we asked for price resolves to asking_price = 35.
       applyBareNumberAndCorrections(text, extracted, session);
+      // Field-word fallback for bare numbers without unit/price words:
+      // "Nahi, price 35 kar do" must update asking_price to 35 directly.
+      if (!hasExtractedData(extracted)) {
+        const standalone = extractStandaloneNumber(text);
+        const hinted = detectChangeField(text);
+        if (standalone != null && hinted === 'asking_price') {
+          extracted.asking_price = standalone;
+          (extracted as Partial<ListingData>).price_unit = session.listing.price_unit || 'kg';
+        } else if (standalone != null && hinted === 'quantity') {
+          extracted.quantity = standalone;
+          (extracted as Partial<ListingData>).unit = session.listing.unit || 'kg';
+        }
+      }
       if (hasExtractedData(extracted)) {
+        // Cumulative state: merge ONLY the requested change, preserve everything else.
         session.listing = mergeListing(session.listing, extracted);
         const missing = getMissingRequiredFields(session.listing);
         if (missing.length === 0) {
           session.state = 'CONFIRMING';
+          session.confirmation_stage = null;
           session.last_asked = null;
           session.last_echo_field = null;
-          const echo = generateEcho(session.listing, extracted, prevListing, language);
-          const msg = echo
-            ? `${echo} ${generateConfirmation(session.listing, language)}`
-            : generateConfirmation(session.listing, language);
+          const msg = generateConfirmation(session.listing, language);
           pushTurn(session, 'agent', msg);
           return respond(session, 'CONFIRMING', msg, []);
         }
@@ -985,32 +1128,73 @@ const processTurn = (sessionId: string, text: string): ConversationTurnResult =>
         pushTurn(session, 'agent', msg);
         return respond(session, 'ASKING', msg, missing, nextField);
       }
-      session.state = 'ASKING';
+      // Bare "Nahi" with no change specified — ask what to change, keep all fields.
+      session.state = 'CONFIRMING';
+      session.confirmation_stage = null;
+      session.last_asked = null;
       session.last_echo_field = null;
       const changeField = detectChangeField(text);
       let askMsg: string;
       if (changeField) {
         session.last_asked = changeField;
-        askMsg = `${isHiLang(language) ? 'Theek hai. ' : 'Okay. '}${generateChangeQuestion(changeField, language)}`;
+        askMsg = generateChangeQuestion(changeField, language);
       } else {
-        session.last_asked = null;
-        askMsg = isHiLang(language) ? 'Theek hai. Kya badalna hai?' : 'Okay. What should I change?';
+        askMsg = isHiLang(language) ? 'Kya change karna hai?' : 'What should I change?';
       }
       pushTurn(session, 'agent', askMsg);
-      return respond(session, 'ASKING', askMsg, getMissingRequiredFields(session.listing), changeField || undefined);
+      return respond(session, 'CONFIRMING', askMsg, getMissingRequiredFields(session.listing), changeField || undefined);
     }
 
-    // Unclear answer while confirming: treat as a correction request.
+    // Follow-up value while confirming (e.g. "price 35" / "35" after bare
+    // "Nahi"): treat as the requested change. Never reset preserved fields.
+    {
+      const prevListing = { ...session.listing };
+      const extracted = extractTurnData(text, session);
+      repairConfirmationFieldSwap(text, extracted);
+      applyBareNumberAndCorrections(text, extracted, session);
+      if (!hasExtractedData(extracted)) {
+        const standalone = extractStandaloneNumber(text);
+        const hinted = detectChangeField(text) || session.last_asked;
+        if (standalone != null && hinted === 'asking_price') {
+          extracted.asking_price = standalone;
+          (extracted as Partial<ListingData>).price_unit = session.listing.price_unit || 'kg';
+        } else if (standalone != null && hinted === 'quantity') {
+          extracted.quantity = standalone;
+          (extracted as Partial<ListingData>).unit = session.listing.unit || 'kg';
+        }
+      }
+      if (hasExtractedData(extracted)) {
+        session.listing = mergeListing(session.listing, extracted);
+        const missing = getMissingRequiredFields(session.listing);
+        if (missing.length === 0) {
+          session.state = 'CONFIRMING';
+          session.confirmation_stage = null;
+          session.last_asked = null;
+          session.last_echo_field = null;
+          const msg = generateConfirmation(session.listing, language);
+          pushTurn(session, 'agent', msg);
+          return respond(session, 'CONFIRMING', msg, []);
+        }
+        const nextField = getPriorityNextField(missing);
+        session.last_asked = nextField;
+        session.last_echo_field = lastEchoField(extracted);
+        session.state = 'ASKING';
+        const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language);
+        pushTurn(session, 'agent', msg);
+        return respond(session, 'ASKING', msg, missing, nextField);
+      }
+    }
+    // Unclear answer while confirming: do NOT submit — ask what to change.
     const changeField = detectChangeField(text);
-    session.state = 'ASKING';
+    session.confirmation_stage = null;
     session.last_asked = changeField;
     const askMsg = changeField
-      ? `${isHiLang(language) ? 'Theek hai. ' : 'Okay. '}${generateChangeQuestion(changeField, language)}`
+      ? generateChangeQuestion(changeField, language)
       : isHiLang(language)
-        ? 'Theek hai. Kya badalna hai?'
-        : 'Okay. What should I change?';
+        ? 'Kya change karna hai?'
+        : 'What should I change?';
     pushTurn(session, 'agent', askMsg);
-    return respond(session, 'ASKING', askMsg, getMissingRequiredFields(session.listing), changeField || undefined);
+    return respond(session, 'CONFIRMING', askMsg, getMissingRequiredFields(session.listing), changeField || undefined);
   }
 
   session.state = 'PROCESSING';
@@ -1107,7 +1291,7 @@ export const sendConversationTurn = async (
   }
   // Local engine — resolves immediately, no network. Kept async so the UI
   // contract (await sendConversationTurn) stays unchanged.
-  return processTurn(sessionId, trimmed);
+  return await processTurn(sessionId, trimmed);
 };
 
 export const resetConversation = (sessionId: string): void => {
@@ -1154,21 +1338,28 @@ export interface SubmitListingResult {
 export const submitListing = async (listing: FinalListing): Promise<SubmitListingResult> => {
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), 20000);
+  const jsonBody = JSON.stringify(listing);
+  console.log('[SUBMIT_LISTING] POST /api/listings');
+  console.log('[SUBMIT_LISTING] POST BODY:', jsonBody);
   try {
     const res = await fetch('/api/listings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(listing),
+      body: jsonBody,
       signal: controller.signal,
     });
     const data = await res.json().catch(() => null);
+    console.log('[SUBMIT_LISTING] HTTP STATUS:', res.status);
+    console.log('[SUBMIT_LISTING] RESPONSE BODY:', JSON.stringify(data, null, 2));
     if (res.status === 201 && data?.success) {
+      console.log('[SUBMIT_LISTING] SUCCESS - listing_id:', data.listing_id);
       return {
         success: true,
         listing_id: data.listing_id,
         status: data.status,
       };
     }
+    console.log('[SUBMIT_LISTING] FAILED - error:', data?.error || `HTTP ${res.status}`);
     return {
       success: false,
       error: data?.error || `HTTP ${res.status}`,

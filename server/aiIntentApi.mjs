@@ -658,6 +658,16 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
     let parsed;
     try {
       parsed = JSON.parse(body);
+      console.log('[LISTINGS] Parsed body keys:', Object.keys(parsed));
+      console.log('[LISTINGS] farmer_name:', JSON.stringify(parsed.farmer_name), 'type:', typeof parsed.farmer_name);
+      console.log('[LISTINGS] phone:', JSON.stringify(parsed.phone), 'type:', typeof parsed.phone);
+      console.log('[LISTINGS] product:', JSON.stringify(parsed.product), 'type:', typeof parsed.product);
+      console.log('[LISTINGS] quantity:', JSON.stringify(parsed.quantity), 'type:', typeof parsed.quantity);
+      console.log('[LISTINGS] unit:', JSON.stringify(parsed.unit), 'type:', typeof parsed.unit);
+      console.log('[LISTINGS] asking_price:', JSON.stringify(parsed.asking_price), 'type:', typeof parsed.asking_price);
+      console.log('[LISTINGS] price_unit:', JSON.stringify(parsed.price_unit), 'type:', typeof parsed.price_unit);
+      console.log('[LISTINGS] location:', JSON.stringify(parsed.location), 'type:', typeof parsed.location);
+      console.log('[LISTINGS] quality:', JSON.stringify(parsed.quality), 'type:', typeof parsed.quality);
     } catch {
       console.error('[LISTINGS] Malformed JSON');
       sendJson(response, 400, { success: false, error: 'Malformed JSON' }, request);

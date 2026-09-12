@@ -1,4 +1,4 @@
-import { extractListingFallback, looksLikeCleanValue } from './extractListingParser.mjs';
+import { extractListingFallback, looksLikeCleanValue, extractNameFromText as extractNameFromTextImported } from './extractListingParser.mjs';
 
 const LISTINGS_API_URL = process.env.LISTINGS_API_URL || 'http://localhost:8787/api/listings';
 
@@ -106,8 +106,8 @@ const numberToHindiWords = (n, language = 'hinglish') => {
   const onesHing = ['', 'ek', 'do', 'teen', 'chaar', 'paanch', 'chhe', 'saat', 'aath', 'nau',
     'das', 'gyaarah', 'baarah', 'terah', 'chaudah', 'pandrah', 'solah', 'satrah', 'athaarah', 'unnis'];
 
-  const tensDev = ['', '', 'बीस', 'तीस', 'चालिस', 'पचास', 'साठ', 'सत्तर', 'अस्सी', 'नब्बे'];
-  const tensHing = ['', '', 'bees', 'tees', 'chhees', 'pachaas', 'saath', 'sattar', 'assi', 'nabbe'];
+  const tensDev = ['', '', 'बीस', 'तीस', 'चालीस', 'पचास', 'साठ', 'सत्तर', 'अस्सी', 'नब्बे'];
+  const tensHing = ['', '', 'bees', 'tees', 'chalis', 'pachaas', 'saath', 'sattar', 'assi', 'nabbe'];
 
   const hundredsDev = ['', 'एक सौ', 'दो सौ', 'तीन सौ', 'चार सौ', 'पाँच सौ', 'छह सौ', 'सात सौ', 'आठ सौ', 'नौ सौ'];
   const hundredsHing = ['', 'ek sau', 'do sau', 'teen sau', 'chaar sau', 'paanch sau', 'chhe sau', 'saat sau', 'aath sau', 'nau sau'];
@@ -144,7 +144,7 @@ const numberToHindiWords = (n, language = 'hinglish') => {
 
 const PRODUCT_SAY = {
   Tomato: { hi: 'tamatar', en: 'tomatoes' },
-  Potato: { hi: 'aloo', en: 'potatoes' },
+  Potato: { hi: 'aalu', en: 'potatoes' },
   Onion: { hi: 'pyaaz', en: 'onions' },
   Wheat: { hi: 'gehun', en: 'wheat' },
   Rice: { hi: 'chawal', en: 'rice' },
@@ -168,6 +168,7 @@ const createSession = (sessionId) => {
     language: null,
     last_asked: null,
     last_echo_field: null,
+    confirmation_stage: null,
     created_at: Date.now(),
     updated_at: Date.now(),
   };
@@ -263,8 +264,10 @@ const generateChangeQuestion = (field, language) => {
 const sayProduct = (product, language) => {
   if (!product) return isHiLang(language) ? 'saman' : 'produce';
   const map = PRODUCT_SAY[product];
-  if (map) return isHiLang(language) && language === 'hi' ? map.hi : map.en;
-  // Unknown product — use it as-is (title-cased by extraction).
+  // For Hindi/Hinglish, always use Hindi product name (e.g., Potato → aalu, Tomato → tamatar)
+  // This ensures "2 kg potatoes" → "do kilo aalu" dynamically, without hardcoding or confusing products.
+  if (map) return isHiLang(language) ? map.hi : map.en;
+  // Unknown product — use it as-is (title-cased by extraction), dynamically for ALL products.
   return String(product);
 };
 
@@ -333,47 +336,65 @@ const extractStandaloneNumber = (text) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const extractNameFromText = (text) => {
-  const lower = text.toLowerCase();
-  const titleCase = (s) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-  // Names must be clean word sequences: rejects "ghaziabad se" (place +
-  // postposition caught by "Main X hoon"), digits, and glue fragments.
-  let m = lower.match(/(?:mera naam|my name is)\s+([a-zA-Z\u0900-\u097F][a-zA-Z\u0900-\u097F\s]{0,30}?)(?:\s+(?:hai|hain|ho|se|mein|from|is|am)|[.,]|$)/);
-  if (m) {
-    const name = m[1].trim();
-    if (name.length >= 2 && name.length <= 40 && looksLikeCleanValue(name, 3)) {
-      return titleCase(name);
-    }
-  }
+const extractNameFromText = extractNameFromTextImported;
 
-  m = lower.match(/(?:i am|i'm)\s+([a-zA-Z\u0900-\u097F][a-zA-Z\u0900-\u097F\s]{0,30}?)(?:\s+(?:from|hai|hain|ho|se|mein)|[.,]|$)/);
-  if (m) {
-    const name = m[1].trim();
-    if (name.length >= 2 && name.length <= 40 && looksLikeCleanValue(name, 3)) {
-      return titleCase(name);
-    }
-  }
+const WORD_TO_DIGIT = {
+  'zero': '0', 'oh': '0', 'o': '0',
+  'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
+  'shunya': '0', 'sunya': '0', 'shuniya': '0', 'suniya': '0', 'shuny': '0',
+  'ek': '1', 'aek': '1',
+  'do': '2',
+  'teen': '3',
+  'chaar': '4', 'char': '4',
+  'paanch': '5', 'panch': '5', 'paach': '5',
+  'chhah': '6', 'chheh': '6', 'chhe': '6', 'cheh': '6', 'chah': '6', 'che': '6', 'chhay': '6',
+  'saat': '7', 'saath': '7', 'sath': '7',
+  'aath': '8', 'ath': '8', 'aat': '8',
+  'nau': '9', 'nao': '9', 'nav': '9',
+  'शून्य': '0', 'एक': '1', 'दो': '2', 'तीन': '3', 'चार': '4', 'पाँच': '5', 'पांच': '5', 'छह': '6', 'छः': '6', 'सात': '7', 'आठ': '8', 'नौ': '9',
+  '०': '0', '१': '1', '२': '2', '३': '3', '४': '4', '५': '5', '६': '6', '७': '7', '८': '8', '९': '9',
+};
 
-  m = lower.match(/(?:main|main)\s+([a-zA-Z\u0900-\u097F][a-zA-Z\u0900-\u097F\s]{0,30}?)\s+(?:hun|hoon|hain|hai)/);
-  if (m) {
-    const name = m[1].trim();
-    if (name.length >= 2 && name.length <= 40 && looksLikeCleanValue(name, 3)) {
-      return titleCase(name);
-    }
-  }
-
-  m = lower.match(/(?:naam|name)\s+(?:mera|hai|is|:)?\s*([a-zA-Z\u0900-\u097F][a-zA-Z\u0900-\u097F\s]{0,30}?)(?:\s+(?:hai|hain|ho|se|mein|from|is)|[.,]|$)/);
-  if (m) {
-    const name = m[1].trim();
-    if (name.length >= 2 && name.length <= 40 && looksLikeCleanValue(name, 3)) {
-      return titleCase(name);
-    }
-  }
-
+const normalizePhoneDigits = (digits) => {
+  let d = String(digits).replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  if (d.length === 10 && /^[6-9]/.test(d)) return d;
   return null;
 };
 
+const extractPhoneFromWords = (text) => {
+  if (!text || typeof text !== 'string') return null;
+  const lower = text.toLowerCase();
+  const tokens = lower.replace(/[^a-z0-9\u0900-\u097F]+/g, ' ').split(/\s+/).filter(Boolean);
+  let currentSeq = '';
+  let best = null;
+  const flush = () => {
+    if (currentSeq.length >= 10) {
+      for (let s = 0; s <= currentSeq.length - 10; s++) {
+        const win = currentSeq.slice(s, s + 10);
+        if (/^[6-9]/.test(win)) { best = win; return true; }
+      }
+      const norm = normalizePhoneDigits(currentSeq);
+      if (norm) { best = norm; return true; }
+    }
+    return false;
+  };
+  for (const tok of tokens) {
+    const d = WORD_TO_DIGIT[tok];
+    if (d !== undefined) {
+      currentSeq += d;
+    } else {
+      if (flush()) break;
+      currentSeq = '';
+    }
+  }
+  if (!best) flush();
+  return best;
+};
+
 const extractPhoneFromText = (text) => {
+  if (!text || typeof text !== 'string') return null;
   const cleaned = text.replace(/[\s\-\(\)\.]/g, '');
   let m = cleaned.match(/(?:^|\D)([6-9]\d{9})(?:\D|$)/);
   if (m) return m[1];
@@ -386,6 +407,18 @@ const extractPhoneFromText = (text) => {
     const combined = m[1] + m[2];
     if (/^[6-9]/.test(combined)) return combined;
   }
+  const devDigits = text.replace(/[^०-९]/g, '');
+  if (devDigits.length >= 10) {
+    const ascii = devDigits.split('').map(ch => WORD_TO_DIGIT[ch] || '').join('');
+    const norm = normalizePhoneDigits(ascii);
+    if (norm) return norm;
+    for (let s = 0; s <= ascii.length - 10; s++) {
+      const win = ascii.slice(s, s + 10);
+      if (/^[6-9]/.test(win)) return win;
+    }
+  }
+  const fromWords = extractPhoneFromWords(text);
+  if (fromWords) return fromWords;
   return null;
 };
 
@@ -451,21 +484,23 @@ const generateQuestion = (field, language) => {
 };
 
 const generateConfirmation = (listing, language) => {
+  // Dynamic, no hardcoding — every value from user input
+  // Respects language param for direct tests, but voice flow (processTurn) always passes 'hinglish' for Hindi-only
   const product = sayProduct(listing.product, language);
   const qty = sayQty(listing, language) || (isHiLang(language) ? 'kuch' : 'some');
   const price = sayPrice(listing, language);
   const place = listing.location || (isHiLang(language) ? 'aapke gaon' : 'your place');
   const name = listing.farmer_name;
   const phone = sayPhone(listing.phone);
-
   const quality = listing.quality ? `${listing.quality} ` : '';
+
   if (isHiLang(language)) {
     let msg = `Ek baar check kar lo. Aap ${qty} ${quality}${product} bechna chahte hain`;
     if (price) msg += `, ${price}`;
     msg += `, ${place} se.`;
     if (name) msg += ` Naam ${name}.`;
     if (phone) msg += ` Number ${phone}.`;
-    msg += ' Sab theek hai?';
+    msg += ' Sab theek hai.';
     return msg;
   }
 
@@ -575,6 +610,26 @@ const lastEchoField = (extracted) => {
 };
 
 const buildAskMessage = (listing, extracted, prevListing, nextField, language) => {
+  // If the next field already has a value in the listing, find the next missing field
+  // This ensures we NEVER re-ask for a field that is already captured, including
+  // farmer_name and phone. The recursion handles newly filled fields correctly.
+  if (nextField && (listing[nextField] !== null && listing[nextField] !== undefined)) {
+    // Get the missing fields and find the next one that's actually missing
+    const missing = getMissingRequiredFields(listing);
+    if (missing.length === 0) {
+      return isHiLang(language) ? 'Sab theek hai!' : 'All fields are complete!';
+    }
+    // Use the same priority order as getPriorityNextField
+    const order = ['product', 'quantity', 'asking_price', 'location', 'farmer_name', 'phone'];
+    for (const f of order) {
+      if (missing.includes(f)) {
+        return buildAskMessage(listing, extracted, prevListing, f, language);
+      }
+    }
+    // Fallback to first missing field
+    return buildAskMessage(listing, extracted, prevListing, missing[0], language);
+  }
+
   // Unclear answer to the previous question: gently re-ask, don't skip ahead.
   if (extracted && isUnusableTurn(extracted)) {
     return isHiLang(language)
@@ -590,6 +645,10 @@ const isConfirmationAffirmative = (text) => {
   const lower = text.toLowerCase().trim().replace(/[.,!?]/g, '');
   if (/^haan\s+(lekin|par|but|however)/i.test(lower)) return false;
   if (/^(no|nahi|nahin|cancel|ruk|stop)/i.test(lower)) return false;
+  // If the text contains correction/change indicators, it's not a pure
+  // affirmation. "Haan, quantity badalni hai" should go to correction flow.
+  // Bare "correct" alone is affirmative (farmer confirming correctness).
+  if (lower !== 'correct' && /\b(badal|change|modify|galat|wrong|nahi|actually|wait|kuch|lekin|par|but|edit|update|correct|fix)\b/i.test(lower)) return false;
   return /^(haan|ha|yes|yep|yup|ji haan|bilkul|correct|sahi|theek|ok|okay|ji|haanji|confirm|create|banado|bana do|\+|y)(?:\s|$)/i.test(lower) ||
     /^(sab|all|everything)\s+(sahi|theek|correct)/i.test(lower) ||
     /^(yes\s+please|ji\s+bilkul)/i.test(lower);
@@ -635,6 +694,26 @@ const applyBareNumberAndCorrections = (text, extracted, session) => {
   const hasPriceWord = /(rupaye|rupee|rs\b|â‚¹|per\s*kilo|per\s*kg|à¤°à¥à¤ªà¤¯à¥‡)/.test(lower);
   const asked = session.last_asked;
   const standalone = extractStandaloneNumber(text);
+
+  // Phone numbers must never be mistaken for quantity/price.
+  // A 10-digit number starting 6-9 is a phone, not a bare quantity.
+  const isPhoneLike = standalone != null && (() => {
+    const s = String(standalone).replace(/\D/g, '');
+    return s.length >= 10 && /^[6-9]/.test(s);
+  })();
+  if (isPhoneLike) {
+    if (extracted.phone == null) {
+      const norm = normalizePhoneDigits(String(standalone));
+      if (norm) {
+        extracted.phone = norm;
+        return;
+      }
+    }
+    // Don't treat phone-like huge numbers as quantity/price when no explicit unit/price word
+    if (!hasQtyWord && !hasPriceWord) {
+      return;
+    }
+  }
 
   if (extracted.quantity == null && hasQtyWord && standalone != null && !hasPriceWord) {
     extracted.quantity = standalone;
@@ -699,7 +778,8 @@ const applySlotFallbacks = (text, extracted, session) => {
     const lower = trimmed.toLowerCase();
     // Strip correction prefix to get the bare name
     const stripped = lower.replace(/^(nahi|nahin|no|nope|galat|wrong|wait|actually)[,\s]*/i, '').trim();
-    const hasNonNameWords = /\b(se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile|price|kimat|rate|quality|grade|location|address|gaon|village|shehar|city|jagah)\b/.test(stripped);
+    if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(stripped)) return;
+    const hasNonNameWords = /\b(namaste|namaskar|se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile|price|kimat|rate|quality|grade|location|address|gaon|village|shehar|city|jagah)\b/.test(stripped);
     if (stripped.length >= 2 && stripped.length <= 20 && !/\d/.test(stripped) && !hasNonNameWords) {
       extracted.farmer_name = stripped.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     }
@@ -710,7 +790,8 @@ const applySlotFallbacks = (text, extracted, session) => {
   if (nextField === 'farmer_name' && !extracted.farmer_name) {
     const trimmed = text.trim().replace(/[.,!?;:'"()]/g, '');
     const lower = trimmed.toLowerCase();
-    const hasNonNameWords = /\b(se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile)\b/.test(lower);
+    if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(lower)) return;
+    const hasNonNameWords = /\b(namaste|namaskar|se|hai|hain|ho|hun|hoon|mein|mera|meri|mere|ka|ki|ke|kya|kitna|kitne|yeh|woh|aur|ya|bhi|to|phir|ab|kal|aaj|wo|ye|paas|rupo?ye|kilo|wheat|rice|tomato|potato|onion|bechna|sell|buy|number|mobile)\b/.test(lower);
     if (trimmed.length >= 2 && trimmed.length <= 20 && !/\d/.test(trimmed) && !hasNonNameWords && looksLikeCleanValue(trimmed, 3)) {
       extracted.farmer_name = trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     }
@@ -722,19 +803,38 @@ const applySlotFallbacks = (text, extracted, session) => {
       if (/^[6-9]/.test(last10)) {
         extracted.phone = last10;
       }
+    } else {
+      // Fallback for spoken Hindi/Hinglish/English number words when digits not found
+      const fromWords = extractPhoneFromWords(text);
+      if (fromWords) extracted.phone = fromWords;
     }
   }
   if (nextField === 'location' && !extracted.location) {
     const trimmed = text.trim().replace(/[.,!?;:'"()]/g, '');
     const lower = trimmed.toLowerCase();
+    // Never treat greetings as location — "Namaste" is a greeting, not a place
+    if (['namaste','namaste ji','namaskar','hello','hi','hey','hii'].includes(lower)) return;
     // A bare product answer ("Gobhi") is NEVER a place name; the echo of the
     // assistant's own words is rejected by looksLikeCleanValue as well.
     const isEcho = /\b(aap|ji|bechna|chahte|chahenge|theek|sab|ek\s+baar|check)\b/.test(lower);
+    // Multi-word bare text without location grammar ("se", "mein", "from") is
+    // more likely a name than a place — e.g. "Diya Raghav" must not become a
+    // location. Only accept as location if it has location grammar or is a
+    // single word (which is ambiguous and resolved by last_asked).
+    const hasLocPrep = /\b(se|mein|me|from|in|at|near|paas)\b/i.test(trimmed);
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
     if (
       trimmed.length >= 2 && trimmed.length <= 40 && !/\d/.test(trimmed)
       && !isNoiseAnswer(text) && !isEcho && looksLikeCleanValue(trimmed, 3)
     ) {
-      extracted.location = trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      if (hasLocPrep || wordCount === 1) {
+        extracted.location = trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      } else if (!extracted.farmer_name && wordCount >= 2) {
+        // Multi-word text without location grammar is a name, not a place.
+        // Capture as farmer_name so the name isn't lost when the agent asked
+        // for location but the farmer gave their name instead.
+        extracted.farmer_name = trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      }
     }
   }
 };
@@ -744,11 +844,28 @@ const extractTurnData = (text, session) => {
   applySellIntentOverride(text, extracted);
   const nameFromText = extractNameFromText(text);
   if (nameFromText) {
+    // If the extracted name is the same as the detected location, the name
+    // wins — the name detector uses grammar context ("main X hoon", "mera naam
+    // X hai") so it is more reliable for identity statements. Clear the false
+    // location to prevent farmer name from appearing as location in the
+    // confirmation message.
+    if (extracted.location && extracted.location.toLowerCase() === nameFromText.toLowerCase()) {
+      extracted.location = null;
+    }
     extracted.farmer_name = nameFromText;
     // If the extracted product is the same as the name, it was a false positive.
     // Use empty string (not null) so mergeListing overwrites the previous product.
     if (extracted.product && extracted.product.toLowerCase() === nameFromText.toLowerCase()) {
       extracted.product = '';
+    }
+  } else if (extracted.location && !extracted.farmer_name) {
+    // detectLocation may have classified a bare word as a location. If the
+    // system wasn't asking for location and the text has no grammar context
+    // ("se", "mein"), the word is ambiguous — treat as name instead.
+    const hasAnyPrep = /\b(se|mein|from|in|at|near|paas)\b/i.test(text);
+    if (session.last_asked !== 'location' && !hasAnyPrep) {
+      extracted.farmer_name = extracted.location;
+      extracted.location = null;
     }
   }
   const phoneFromText = extractPhoneFromText(text);
@@ -780,18 +897,31 @@ const processTurn = async (sessionId, text) => {
   session.turns.push({ role: 'farmer', text: text.trim(), timestamp: Date.now() });
 
   const prevState = session.state;
-  const language = resolveLanguage(session, text);
-  session.language = language;
+  // Hindi-only speech: always respond in Hindi (Hinglish Roman) dynamically from user data
+  const language = 'hinglish';
+  session.language = 'hinglish';
 
-  // First contact with a vague opener: greet, then ask what they sell.
-  // If the farmer already starts with their produce, skip the ceremony.
+  // First contact: handle Namaste greeting naturally, without treating as data
   if (prevState === STATES.IDLE && !session.greeted) {
     session.greeted = true;
+    const trimmedLower = text.trim().toLowerCase().replace(/[.,!?]/g, '');
+    if (trimmedLower === 'namaste' || trimmedLower === 'namaste ji' || trimmedLower === 'namaskar' || trimmedLower === 'namaskar ji' || trimmedLower === 'namasteji') {
+      const msg = 'Namaste ji, aap kya bechna chahte hain?';
+      session.state = STATES.LISTENING;
+      session.last_asked = 'product';
+      session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
+      return {
+        state: STATES.LISTENING,
+        listing: { ...session.listing },
+        agent_message: msg,
+        missing_fields: REQUIRED_FIELDS,
+        next_field: 'product',
+        session_id: sessionId,
+      };
+    }
     const firstExtracted = extractTurnData(text, session);
     if (isUnusableTurn(firstExtracted)) {
-      const msg = isHiLang(language)
-        ? 'Namaste! Main aapka saman bechne mein madad karunga. Aap kya bechna chahte hain?'
-        : "Hello! I'll help you sell your produce. What do you want to sell?";
+      const msg = 'Namaste ji, aap kya bechna chahte hain?';
       session.state = STATES.LISTENING;
       session.last_asked = 'product';
       session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
@@ -826,93 +956,90 @@ const processTurn = async (sessionId, text) => {
       };
     }
     if (isConfirmationAffirmative(text)) {
-      session.state = STATES.SUBMITTING;
-      const submittingMsg = farmerMsg(language, 'Theek hai, ab daal raha hoon...', 'Okay, saving it now...');
-      session.turns.push({ role: 'agent', text: submittingMsg, timestamp: Date.now() });
-
-      const result = await submitListing(session.listing);
-
-      if (result.success) {
-        session.state = STATES.SUCCESS;
-        const qtySay = sayQty(session.listing, language);
-        const prodSay = sayProduct(session.listing.product, language);
-        const priceSay = sayPrice(session.listing, language);
-        const hiSummary = [qtySay ? `${qtySay} ${prodSay}` : null, priceSay].filter(Boolean).join(', ');
-        const enSummary = [qtySay ? `${qtySay} of ${prodSay}` : null, priceSay ? `at ${priceSay}` : null].filter(Boolean).join(' ');
-        const successMsg = farmerMsg(
-          language,
-          `Ho gaya! Aapki listing ban gayi${hiSummary ? ` - ${hiSummary}` : ''}.\n\nNumber: ${result.listing_id}`,
-          `Done! Your listing is live${enSummary ? ` - ${enSummary}` : ''}.\n\nNumber: ${result.listing_id}`
-        );
-        session.turns.push({ role: 'agent', text: successMsg, timestamp: Date.now() });
+      // Two-stage confirmation: first "haan" asks if they want changes,
+      // second "haan" enters correction flow, "nahi" submits.
+      if (session.confirmation_stage !== 'changes') {
+        session.confirmation_stage = 'changes';
+        const msg = 'Kuch badalna hai?';
+        session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
         return {
-          state: STATES.SUCCESS,
+          state: STATES.CONFIRMING,
           listing: { ...session.listing },
-          listing_id: result.listing_id,
-          agent_message: successMsg,
+          agent_message: msg,
           missing_fields: [],
           session_id: sessionId,
         };
       }
-
-      session.state = STATES.CONFIRMING;
-      const errorMsg = farmerMsg(
-        language,
-        `Abhi nahi ho paya. Phir try karein?`,
-        `It did not go through. Try again?`
-      );
-      session.turns.push({ role: 'agent', text: errorMsg, timestamp: Date.now() });
+      // Second affirmative (YES to "Kuch badalna hai?") — enter correction flow
+      session.state = STATES.ASKING;
+      session.last_echo_field = null;
+      session.last_asked = null;
+      const askMsg = farmerMsg(language, 'Theek hai. Kya badalna hai?', 'Okay. What should I change?');
+      session.turns.push({ role: 'agent', text: askMsg, timestamp: Date.now() });
       return {
-        state: STATES.CONFIRMING,
+        state: STATES.ASKING,
         listing: { ...session.listing },
-        agent_message: errorMsg,
-        missing_fields: [],
+        agent_message: askMsg,
+        missing_fields: getMissingRequiredFields(session.listing),
         session_id: sessionId,
       };
     }
     if (isBareNoChangeResponse(text)) {
-      // "Nahi" / "nahi sab theek hai" during confirmation = no changes needed.
-      // Treat as affirmative and submit.
-      session.state = STATES.SUBMITTING;
-      const submittingMsg = farmerMsg(language, 'Theek hai, ab daal raha hoon...', 'Okay, saving it now...');
-      session.turns.push({ role: 'agent', text: submittingMsg, timestamp: Date.now() });
+      // Stage 2: "nahi" to "Kuch badalna hai?" = submit
+      if (session.confirmation_stage === 'changes') {
+        session.state = STATES.SUBMITTING;
+        const submittingMsg = farmerMsg(language, 'Theek hai, ab daal raha hoon...', 'Okay, saving it now...');
+        session.turns.push({ role: 'agent', text: submittingMsg, timestamp: Date.now() });
 
-      const result = await submitListing(session.listing);
+        const result = await submitListing(session.listing);
 
-      if (result.success) {
-        session.state = STATES.SUCCESS;
-        const qtySay = sayQty(session.listing, language);
-        const prodSay = sayProduct(session.listing.product, language);
-        const priceSay = sayPrice(session.listing, language);
-        const hiSummary = [qtySay ? `${qtySay} ${prodSay}` : null, priceSay].filter(Boolean).join(', ');
-        const enSummary = [qtySay ? `${qtySay} of ${prodSay}` : null, priceSay ? `at ${priceSay}` : null].filter(Boolean).join(' ');
-        const successMsg = farmerMsg(
+        if (result.success) {
+          session.state = STATES.SUCCESS;
+          const qtySay = sayQty(session.listing, language);
+          const prodSay = sayProduct(session.listing.product, language);
+          const priceSay = sayPrice(session.listing, language);
+          const hiSummary = [qtySay ? `${qtySay} ${prodSay}` : null, priceSay].filter(Boolean).join(', ');
+          const enSummary = [qtySay ? `${qtySay} of ${prodSay}` : null, priceSay ? `at ${priceSay}` : null].filter(Boolean).join(' ');
+          const successMsg = farmerMsg(
+            language,
+            `Ho gaya! Aapki listing ban gayi${hiSummary ? ` - ${hiSummary}` : ''}.\n\nNumber: ${result.listing_id}`,
+            `Done! Your listing is live${enSummary ? ` - ${enSummary}` : ''}.\n\nNumber: ${result.listing_id}`
+          );
+          session.turns.push({ role: 'agent', text: successMsg, timestamp: Date.now() });
+          return {
+            state: STATES.SUCCESS,
+            listing: { ...session.listing },
+            listing_id: result.listing_id,
+            agent_message: successMsg,
+            missing_fields: [],
+            session_id: sessionId,
+          };
+        }
+
+        session.state = STATES.CONFIRMING;
+        session.confirmation_stage = null;
+        const errorMsg = farmerMsg(
           language,
-          `Ho gaya! Aapki listing ban gayi${hiSummary ? ` - ${hiSummary}` : ''}.\n\nNumber: ${result.listing_id}`,
-          `Done! Your listing is live${enSummary ? ` - ${enSummary}` : ''}.\n\nNumber: ${result.listing_id}`
+          `Abhi nahi ho paya. Phir try karein?`,
+          `It did not go through. Try again?`
         );
-        session.turns.push({ role: 'agent', text: successMsg, timestamp: Date.now() });
+        session.turns.push({ role: 'agent', text: errorMsg, timestamp: Date.now() });
         return {
-          state: STATES.SUCCESS,
+          state: STATES.CONFIRMING,
           listing: { ...session.listing },
-          listing_id: result.listing_id,
-          agent_message: successMsg,
+          agent_message: errorMsg,
           missing_fields: [],
           session_id: sessionId,
         };
       }
-
-      session.state = STATES.CONFIRMING;
-      const errorMsg = farmerMsg(
-        language,
-        `Abhi nahi ho paya. Phir try karein?`,
-        `It did not go through. Try again?`
-      );
-      session.turns.push({ role: 'agent', text: errorMsg, timestamp: Date.now() });
+      // Stage 1: bare "nahi" without specifying a change → ask what to change
+      session.confirmation_stage = 'changes';
+      const msg = 'Kuch badalna hai?';
+      session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
       return {
         state: STATES.CONFIRMING,
         listing: { ...session.listing },
-        agent_message: errorMsg,
+        agent_message: msg,
         missing_fields: [],
         session_id: sessionId,
       };
@@ -929,6 +1056,7 @@ const processTurn = async (sessionId, text) => {
         const missing = getMissingRequiredFields(session.listing);
         if (missing.length === 0) {
           session.state = STATES.CONFIRMING;
+          session.confirmation_stage = null;
           session.last_asked = null;
           session.last_echo_field = null;
           const echo = generateEcho(session.listing, extracted, prevListing, language);
@@ -1003,6 +1131,7 @@ const processTurn = async (sessionId, text) => {
       const missing = getMissingRequiredFields(session.listing);
       if (missing.length === 0) {
         session.state = STATES.CONFIRMING;
+        session.confirmation_stage = null;
         session.last_asked = null;
         session.last_echo_field = null;
         const msg = generateConfirmation(session.listing, language);
@@ -1065,6 +1194,7 @@ const processTurn = async (sessionId, text) => {
 
   if (missing.length === 0) {
     session.state = STATES.CONFIRMING;
+    session.confirmation_stage = null;
     session.last_asked = null;
     session.last_echo_field = null;
     const msg = generateConfirmation(session.listing, language);

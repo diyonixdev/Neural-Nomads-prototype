@@ -38,7 +38,8 @@ try {
   console.warn('[DOCS] Failed to load openapi.json:', e.message);
 }
 
-const PORT = Number(process.env.AI_INTENT_PORT ?? 8787);
+const PORT = Number(process.env.PORT ?? process.env.AI_INTENT_PORT ?? 8787);
+const HOST = process.env.HOST ?? '0.0.0.0';
 let API_KEY = process.env.AI_API_KEY;
 let MODEL = process.env.AI_API_MODEL;
 const API_BASE_URL = process.env.AI_API_BASE_URL ?? 'https://openrouter.ai/api/v1';
@@ -1762,8 +1763,8 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
   sendJson(response, 404, { error: 'Not found' }, request);
 }));
 
-server.listen(PORT, () => {
-  console.log(`AI intent API listening on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`AI intent API listening on http://${HOST}:${PORT}`);
   console.log(`  POST /api/listings        (create listing in Firestore)`);
   console.log(`  GET  /api/listings/:id    (retrieve listing by ID from Firestore)`);
   console.log(`  POST /api/extract-listing   (transcript -> structured listing data)`);

@@ -8,7 +8,8 @@
     "dev:ai": "node server/aiIntentApi.mjs",
     "dev:all": "node server/runBoth.mjs",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/aiIntentApi.mjs"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useDemo } from '../../context/DemoContext';
+import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useLocation, NavLink } from 'react-router-dom';
-import { Sprout, RotateCcw, Globe, ShoppingBag, Tractor, Menu, X, Sparkles, Mic, Store, User } from 'lucide-react';
+import { Sprout, RotateCcw, Globe, ShoppingBag, Tractor, Menu, X, Sparkles, Mic, Store, User, ShieldCheck } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 export const Topbar: React.FC = () => {
   const { role, setRole, language, toggleLanguage, resetDemo } = useDemo();
+  const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -29,6 +31,7 @@ export const Topbar: React.FC = () => {
     { label: language === 'hi' ? 'बाज़ार' : 'Marketplace', labelEn: 'Marketplace', to: '/consumer/matches', end: false },
     { label: language === 'hi' ? 'किसानों के लिए' : 'For Farmers', labelEn: 'For Farmers', to: '/farmer', end: false },
     { label: language === 'hi' ? 'AI सहायक' : 'AI Assistant', labelEn: 'AI Assistant', to: role === 'farmer' ? '/farmer/voice' : '/consumer/voice', end: false },
+    { label: language === 'hi' ? 'किसान पोर्टल' : 'Kisan Portal', labelEn: 'Kisan Portal', to: '/login', end: false },
   ];
 
   const isActive = (to: string, end: boolean) => {
@@ -121,15 +124,28 @@ export const Topbar: React.FC = () => {
             <span>{language === 'en' ? 'हिंदी' : 'EN'}</span>
           </button>
 
-          {/* Profile / Login placeholder - desktop */}
+          {/* Profile / Login button - desktop */}
           <div className="hidden sm:flex items-center gap-2">
-            <button
-              onClick={() => navigate(role === 'farmer' ? '/farmer' : '/consumer')}
-              className="w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
-              title="Profile"
-            >
-              <User size={16} />
-            </button>
+            {isAuthenticated && user ? (
+              <button
+                onClick={() => navigate('/login')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition-colors shadow-sm"
+                title="Go to Kisan Portal Dashboard"
+              >
+                <ShieldCheck size={15} className="text-emerald-600" />
+                <span className="max-w-[120px] truncate">{user.name}</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20"
+                title="Sign In / Digital e-KYC"
+              >
+                <ShieldCheck size={14} className="text-emerald-200" />
+                <span>{language === 'hi' ? 'लॉग इन / पहचान' : 'Login / e-KYC'}</span>
+              </button>
+            )}
           </div>
 
           {/* Reset Demo Button - desktop only */}
@@ -175,6 +191,7 @@ export const Topbar: React.FC = () => {
                   {item.labelEn === 'Marketplace' && <ShoppingBag size={16} />}
                   {item.labelEn === 'For Farmers' && <Tractor size={16} />}
                   {item.labelEn === 'AI Assistant' && <Mic size={16} />}
+                  {item.labelEn === 'Kisan Portal' && <ShieldCheck size={16} />}
                   <span>{item.label}</span>
                 </NavLink>
               ))}

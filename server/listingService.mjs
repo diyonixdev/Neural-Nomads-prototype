@@ -77,7 +77,16 @@ function validateListing(data) {
   return errors;
 }
 
+const inMemoryListings = new Map();
+
 function buildListingDoc(data) {
+  let createdAt;
+  try {
+    createdAt = (Timestamp && typeof Timestamp.now === 'function') ? Timestamp.now() : new Date().toISOString();
+  } catch {
+    createdAt = new Date().toISOString();
+  }
+
   return {
     listing_id: data.listing_id || generateListingId(),
     farmer_name: String(data.farmer_name).trim(),
@@ -92,44 +101,50 @@ function buildListingDoc(data) {
     intent: data.intent || 'sell',
     source: data.source || 'voice_agent',
     status: data.status || 'created',
-    created_at: Timestamp.now(),
+    created_at: createdAt,
   };
 }
 
 async function createListing(data) {
-  if (!db) {
-    throw new Error('Firestore is not initialized. Check FIREBASE_SERVICE_ACCOUNT_PATH.');
-  }
-
   const validationErrors = validateListing(data);
   if (validationErrors.length > 0) {
     throw new Error(`Validation failed: ${validationErrors.join('; ')}`);
   }
 
   const listingDoc = buildListingDoc(data);
-  const docRef = db.collection(COLLECTION_NAME).doc(listingDoc.listing_id);
-  await docRef.set(listingDoc);
 
+  if (db) {
+    try {
+      const docRef = db.collection(COLLECTION_NAME).doc(listingDoc.listing_id);
+      await docRef.set(listingDoc);
+      return listingDoc;
+    } catch (err) {
+      console.warn('[listingService] Firestore write failed, using in-memory store:', err.message);
+    }
+  }
+
+  inMemoryListings.set(listingDoc.listing_id, listingDoc);
   return listingDoc;
 }
 
 async function getListingById(listingId) {
-  if (!db) {
-    throw new Error('Firestore is not initialized. Check FIREBASE_SERVICE_ACCOUNT_PATH.');
-  }
-
   if (!listingId || typeof listingId !== 'string') {
     throw new Error('listingId must be a non-empty string');
   }
 
-  const docRef = db.collection(COLLECTION_NAME).doc(listingId);
-  const snap = await docRef.get();
-
-  if (!snap.exists) {
-    return null;
+  if (db) {
+    try {
+      const docRef = db.collection(COLLECTION_NAME).doc(listingId);
+      const snap = await docRef.get();
+      if (snap.exists) {
+        return snap.data();
+      }
+    } catch (err) {
+      console.warn('[listingService] Firestore read failed, checking in-memory store:', err.message);
+    }
   }
 
-  return snap.data();
+  return inMemoryListings.get(listingId) || null;
 }
 
 export {

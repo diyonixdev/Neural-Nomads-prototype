@@ -28,17 +28,28 @@ for (const p of candidates) {
 }
 
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+// Serverless hosts (Vercel) have no place to put a key file, so the whole service
+// account JSON can be supplied inline instead, base64-encoded or as raw JSON.
+const serviceAccountInline = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
 let db = null;
 let firebaseApp = null;
 
-if (!serviceAccountPath) {
-  console.warn('[Firebase] FIREBASE_SERVICE_ACCOUNT_PATH is not set in environment.');
-} else if (!fs.existsSync(serviceAccountPath)) {
+const readServiceAccount = () => {
+  if (serviceAccountInline) {
+    const trimmed = serviceAccountInline.trim();
+    return trimmed.startsWith('{') ? trimmed : Buffer.from(trimmed, 'base64').toString('utf8');
+  }
+  return fs.readFileSync(serviceAccountPath, 'utf8');
+};
+
+if (!serviceAccountInline && !serviceAccountPath) {
+  console.warn('[Firebase] Neither FIREBASE_SERVICE_ACCOUNT_JSON nor FIREBASE_SERVICE_ACCOUNT_PATH is set in environment.');
+} else if (!serviceAccountInline && !fs.existsSync(serviceAccountPath)) {
   console.error(`[Firebase] Service account credential file not found at path: ${serviceAccountPath}`);
 } else {
   try {
-    const serviceAccountRaw = fs.readFileSync(serviceAccountPath, 'utf8');
+    const serviceAccountRaw = readServiceAccount();
     const serviceAccount = JSON.parse(serviceAccountRaw);
 
     if (!admin.getApps().length) {

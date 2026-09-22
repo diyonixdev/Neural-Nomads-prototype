@@ -4,6 +4,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createListing, getListingById } from './listingService.mjs';
 import { processTurn, getSession, deleteSession, STATES } from './conversationManager.mjs';
+import {
+  DelhiveryError,
+  cancelByAwb,
+  createShipmentForOrder,
+  shipmentInputFromOrder,
+  trackByAwb,
+  validateShipmentInput,
+} from './logisticsService.mjs';
+import { checkPincodeServiceability, createWarehouse, fetchWaybills, getConfigStatus } from './delhiveryService.mjs';
 
 // --- Simple .env loader (no extra dependency) ---
 const __dirnameEnv = path.dirname(fileURLToPath(import.meta.url));
@@ -228,8 +237,13 @@ const parsePriceFilter = (text, price) => {
   return price ?? null;
 };
 
-const readBody = (request) =>
-  new Promise((resolve, reject) => {
+const readBody = (request) => {
+  // Serverless hosts (Vercel) may have already consumed the request stream and
+  // exposed the parsed payload on request.body. Reading the stream again would hang.
+  if (request.body !== undefined && request.body !== null) {
+    return Promise.resolve(typeof request.body === 'string' ? request.body : JSON.stringify(request.body));
+  }
+  return new Promise((resolve, reject) => {
     let body = '';
     request.on('data', (chunk) => {
       body += chunk;
@@ -241,6 +255,7 @@ const readBody = (request) =>
     request.on('end', () => resolve(body));
     request.on('error', reject);
   });
+};
 
 const getAllowedOrigin = (request) => {
   const allowed = process.env.AI_ALLOWED_ORIGIN ?? '';
@@ -628,7 +643,34 @@ const markListing = (data) => {
   recentListings.set(hash, Date.now());
 };
 
-const server = http.createServer(withRequestTimeout(async (request, response) => {
+// ==================== Logistics (Delhivery) helpers ====================
+// Turns a stored order into the shipment request logisticsService expects by
+// reusing the existing produce/farmer lookups — no parallel data model.
+const buildShipmentInput = (order, body = {}) => {
+  const listingId = order?.allocations?.[0]?.listing?.id;
+  const produce = listingId ? getProduceById(listingId) : null;
+  const farmer = produce ? serverMockFarmers.find((f) => f.id === produce.farmerId) || null : null;
+  return shipmentInputFromOrder({ order, produce, farmer, body });
+};
+
+// Delhivery failures are surfaced verbatim in intent but never leak credentials:
+// DelhiveryError messages and details are built from sanitized provider text only.
+const toLogisticsErrorPayload = (err) => {
+  if (err instanceof DelhiveryError) {
+    return { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) };
+  }
+  console.error('[LOGISTICS] Unexpected error:', err?.message || err);
+  return { code: 'internal_error', message: 'Logistics request failed.' };
+};
+
+const sendLogisticsError = (response, request, err) => {
+  const payload = toLogisticsErrorPayload(err);
+  const statusCode = err instanceof DelhiveryError ? err.statusCode : 500;
+  console.error(`[LOGISTICS] ${payload.code}: ${payload.message}`);
+  sendJson(response, statusCode, { success: false, error: payload.message, code: payload.code, ...(payload.details ? { details: payload.details } : {}) }, request);
+};
+
+const requestHandler = withRequestTimeout(async (request, response) => {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {}, request);
     return;
@@ -1305,17 +1347,182 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
         createdAt: new Date().toISOString()
       };
 
+      // Matched buyer + produce is the point where logistics becomes relevant.
+      // Opt-in so existing callers are unaffected: pass createShipment:true plus
+      // a `logistics` block with the buyer's delivery address to book Delhivery
+      // in the same request. A logistics failure never voids a confirmed order.
+      let logisticsResult = null;
+      if (reqData.createShipment === true) {
+        try {
+          logisticsResult = { shipment: await createShipmentForOrder(buildShipmentInput(newOrder, reqData.logistics || {})) };
+          newOrder.shipment = logisticsResult.shipment;
+          newOrder.status = 'shipment_booked';
+        } catch (err) {
+          logisticsResult = { error: toLogisticsErrorPayload(err) };
+        }
+      }
+
       const orders = loadStoredOrders();
       orders.push(newOrder);
       saveStoredOrders(orders);
 
-      sendJson(response, 200, { success: true, order: newOrder }, request);
+      sendJson(response, 200, { success: true, order: newOrder, ...(logisticsResult ? { logistics: logisticsResult } : {}) }, request);
     } catch (e) {
       console.error(e);
       sendJson(response, 400, { error: 'Invalid body' }, request);
     }
     return;
   }
+  // ===== LOGISTICS (Delhivery) =====
+  // GET /api/logistics/status — is the integration configured? (no secrets returned)
+  if (method === 'GET' && pathname === '/api/logistics/status') {
+    sendJson(response, 200, { success: true, ...getConfigStatus() }, request);
+    return;
+  }
+
+  // GET /api/logistics/serviceability?pin=110001
+  if (method === 'GET' && pathname === '/api/logistics/serviceability') {
+    try {
+      const result = await checkPincodeServiceability(urlObj.searchParams.get('pin'));
+      sendJson(response, 200, { success: true, ...result }, request);
+    } catch (err) {
+      sendLogisticsError(response, request, err);
+    }
+    return;
+  }
+
+  // GET /api/logistics/waybills?count=1 — pre-fetch AWBs (optional; creation
+  // assigns one automatically for single-piece shipments)
+  if (method === 'GET' && pathname === '/api/logistics/waybills') {
+    try {
+      const waybills = await fetchWaybills(Number(urlObj.searchParams.get('count') || 1));
+      sendJson(response, 200, { success: true, count: waybills.length, waybills }, request);
+    } catch (err) {
+      sendLogisticsError(response, request, err);
+    }
+    return;
+  }
+
+  // POST /api/logistics/create-shipment — books pickup from the farmer and
+  // delivery to the matched buyer. Body: { orderId, pickup?, delivery, ... }
+  // When orderId refers to a stored order, its commodity/weight/amount are used.
+  if (method === 'POST' && pathname === '/api/logistics/create-shipment') {
+    let body;
+    try {
+      body = JSON.parse(await readBody(request));
+    } catch {
+      sendJson(response, 400, { success: false, error: 'Malformed JSON', code: 'invalid_json' }, request);
+      return;
+    }
+    try {
+      const orders = loadStoredOrders();
+      const order = orders.find((o) => o.id === body.orderId) || null;
+      if (body.orderId && !order && body.requireOrder !== false) {
+        sendJson(response, 404, { success: false, error: 'Order not found', code: 'order_not_found' }, request);
+        return;
+      }
+      if (order?.shipment?.awb) {
+        sendJson(response, 409, { success: false, error: 'A shipment already exists for this order', code: 'shipment_exists', shipment: order.shipment }, request);
+        return;
+      }
+
+      const input = order ? buildShipmentInput(order, body) : shipmentInputFromOrder({ order: null, produce: null, farmer: null, body });
+      const shipment = await createShipmentForOrder(input);
+
+      if (order) {
+        order.shipment = shipment;
+        order.status = 'shipment_booked';
+        saveStoredOrders(orders);
+      }
+      console.log(`[LOGISTICS] Shipment created for order ${shipment.orderRef}`);
+      sendJson(response, 201, { success: true, shipment }, request);
+    } catch (err) {
+      sendLogisticsError(response, request, err);
+    }
+    return;
+  }
+
+  // POST /api/logistics/validate-shipment — dry run of the same validation,
+  // no call to Delhivery. Lets the UI check data before booking.
+  if (method === 'POST' && pathname === '/api/logistics/validate-shipment') {
+    try {
+      const body = JSON.parse(await readBody(request));
+      const order = body.orderId ? loadStoredOrders().find((o) => o.id === body.orderId) || null : null;
+      const input = order ? buildShipmentInput(order, body) : shipmentInputFromOrder({ order: null, produce: null, farmer: null, body });
+      const errors = validateShipmentInput(input);
+      sendJson(response, errors.length ? 400 : 200, { success: errors.length === 0, valid: errors.length === 0, errors }, request);
+    } catch {
+      sendJson(response, 400, { success: false, error: 'Malformed JSON', code: 'invalid_json' }, request);
+    }
+    return;
+  }
+
+  // POST /api/logistics/cancel-shipment — { awb }
+  if (method === 'POST' && pathname === '/api/logistics/cancel-shipment') {
+    let body;
+    try {
+      body = JSON.parse(await readBody(request));
+    } catch {
+      sendJson(response, 400, { success: false, error: 'Malformed JSON', code: 'invalid_json' }, request);
+      return;
+    }
+    try {
+      const result = await cancelByAwb(body.awb);
+      const orders = loadStoredOrders();
+      const order = orders.find((o) => o.shipment?.awb === result.awb);
+      if (order) {
+        order.shipment.status = 'cancelled';
+        order.shipment.updatedAt = new Date().toISOString();
+        order.status = 'shipment_cancelled';
+        saveStoredOrders(orders);
+      }
+      sendJson(response, 200, { success: true, ...result }, request);
+    } catch (err) {
+      sendLogisticsError(response, request, err);
+    }
+    return;
+  }
+
+  // POST /api/logistics/warehouse — register the FPO/farmer pickup location.
+  // Delhivery requires this before pickup_location.name can be used.
+  if (method === 'POST' && pathname === '/api/logistics/warehouse') {
+    let body;
+    try {
+      body = JSON.parse(await readBody(request));
+    } catch {
+      sendJson(response, 400, { success: false, error: 'Malformed JSON', code: 'invalid_json' }, request);
+      return;
+    }
+    try {
+      const warehouse = await createWarehouse(body);
+      sendJson(response, 201, { success: true, warehouse }, request);
+    } catch (err) {
+      sendLogisticsError(response, request, err);
+    }
+    return;
+  }
+
+  // GET /api/logistics/track/:awb — live status straight from Delhivery,
+  // merged with the stored order reference when we have one.
+  if (method === 'GET' && pathname.startsWith('/api/logistics/track/')) {
+    const awb = pathname.slice('/api/logistics/track/'.length).split('?')[0].trim();
+    try {
+      const tracking = await trackByAwb(awb);
+      const order = loadStoredOrders().find((o) => o.shipment?.awb === awb) || null;
+      if (order) {
+        order.shipment.status = tracking.status;
+        order.shipment.updatedAt = new Date().toISOString();
+        const all = loadStoredOrders();
+        const idx = all.findIndex((o) => o.id === order.id);
+        if (idx >= 0) { all[idx] = order; saveStoredOrders(all); }
+      }
+      sendJson(response, 200, { success: true, orderId: order?.id ?? null, tracking }, request);
+    } catch (err) {
+      sendLogisticsError(response, request, err);
+    }
+    return;
+  }
+
   // POST /api/marketplace/search — unified buyer search (uses real marketplace data, not fictional)
   if (method === 'POST' && pathname === '/api/marketplace/search') {
     try {
@@ -1761,9 +1968,15 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
   }
 
   sendJson(response, 404, { error: 'Not found' }, request);
-}));
+});
 
-server.listen(PORT, HOST, () => {
+// Vercel serverless entry point (see api/[...path].js)
+export default requestHandler;
+
+const server = http.createServer(requestHandler);
+
+if (!process.env.VERCEL) {
+  server.listen(PORT, HOST, () => {
   console.log(`AI intent API listening on http://${HOST}:${PORT}`);
   console.log(`  POST /api/listings        (create listing in Firestore)`);
   console.log(`  GET  /api/listings/:id    (retrieve listing by ID from Firestore)`);
@@ -1776,6 +1989,8 @@ server.listen(PORT, HOST, () => {
   console.log(`  GET  /docs                (Swagger/OpenAPI documentation)`);
   console.log(`  GET/POST /api/produce, /api/produce/:id, PUT/DELETE /api/produce/:id`);
   console.log(`  GET /api/buyer-requirements, POST /api/marketplace/search`);
+  console.log(`  POST /api/logistics/create-shipment, /api/logistics/validate-shipment, /api/logistics/cancel-shipment`);
+  console.log(`  GET  /api/logistics/track/:awb, /api/logistics/serviceability?pin=, /api/logistics/waybills, /api/logistics/status`);
   console.log(`Allowed origin: ${process.env.AI_ALLOWED_ORIGIN ?? '(auto: any localhost)'}  -> try http://localhost:5173`);
 });
 
@@ -1785,3 +2000,4 @@ server.on('error', (err) => {
     process.exit(1);
   }
 });
+}

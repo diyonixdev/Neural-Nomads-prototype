@@ -9,7 +9,9 @@
     "dev:all": "node server/runBoth.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "node server/aiIntentApi.mjs"
+    "start": "node server/aiIntentApi.mjs",
+    "test:logistics": "node --test server/logisticsService.test.mjs",
+    "test:logistics:e2e": "node test-logistics-e2e.mjs"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

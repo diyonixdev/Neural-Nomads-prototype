@@ -17,7 +17,9 @@
         "summary": "Health check",
         "description": "Returns server health status.",
         "operationId": "getHealth",
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "responses": {
           "200": {
             "description": "Server is healthy",
@@ -37,7 +39,9 @@
         "summary": "Health check (API prefix)",
         "description": "Returns server health status (alternative path).",
         "operationId": "getApiHealth",
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "responses": {
           "200": {
             "description": "Server is healthy",
@@ -57,7 +61,9 @@
         "summary": "Create a new listing",
         "description": "Creates a new farm produce listing in Firestore.",
         "operationId": "createListing",
-        "tags": ["Listings"],
+        "tags": [
+          "Listings"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -120,7 +126,9 @@
         "summary": "Get a listing by ID",
         "description": "Retrieves a single listing from Firestore by its listing_id.",
         "operationId": "getListingById",
-        "tags": ["Listings"],
+        "tags": [
+          "Listings"
+        ],
         "parameters": [
           {
             "name": "listing_id",
@@ -156,6 +164,581 @@
           },
           "500": {
             "description": "Server or Firestore error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/status": {
+      "get": {
+        "summary": "Delhivery integration status",
+        "description": "Reports whether the Delhivery integration is configured. Never returns the API key.",
+        "operationId": "logisticsStatus",
+        "tags": [
+          "Logistics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration status",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": true,
+                  "provider": "delhivery",
+                  "configured": true,
+                  "environment": "staging",
+                  "baseUrl": "https://staging-express.delhivery.com",
+                  "pickupLocationConfigured": true,
+                  "sellerGstTinConfigured": true,
+                  "hsnCodeConfigured": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/serviceability": {
+      "get": {
+        "summary": "Check pincode serviceability",
+        "description": "Delhivery GET /c/api/pin-codes/json/. Call this before booking a shipment.",
+        "operationId": "logisticsServiceability",
+        "tags": [
+          "Logistics"
+        ],
+        "parameters": [
+          {
+            "name": "pin",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "110033"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Serviceability result",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": true,
+                  "pin": "110033",
+                  "serviceable": true,
+                  "prepaid": true,
+                  "cod": true,
+                  "pickup": true,
+                  "district": "North Delhi",
+                  "stateCode": "DL"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "pin is not a 6-digit pincode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DELHIVERY_API_KEY is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/waybills": {
+      "get": {
+        "summary": "Pre-fetch waybills (AWBs)",
+        "description": "Delhivery GET /waybill/api/bulk/json/. Optional: shipment creation assigns a waybill automatically for single-piece shipments.",
+        "operationId": "logisticsWaybills",
+        "tags": [
+          "Logistics"
+        ],
+        "parameters": [
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1,
+              "maximum": 10000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Waybill numbers",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": true,
+                  "count": 1,
+                  "waybills": [
+                    "1234512345678"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DELHIVERY_API_KEY is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/create-shipment": {
+      "post": {
+        "summary": "Create a Delhivery shipment for a matched order",
+        "description": "Validates sender/receiver details, then calls Delhivery POST /api/cmu/create.json. On success the shipment (with its AWB) is stored on the order and the order status becomes shipment_booked. Never returns a fabricated success.",
+        "operationId": "createShipment",
+        "tags": [
+          "Logistics"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateShipmentRequest"
+              },
+              "example": {
+                "orderId": "ord-1758200000000-123",
+                "paymentMode": "Prepaid",
+                "delivery": {
+                  "name": "Delhi Fresh Mart",
+                  "phone": "9876543210",
+                  "address": "Shop 4, Azadpur Mandi",
+                  "city": "Delhi",
+                  "state": "Delhi",
+                  "pin": "110033"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Shipment created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "shipment": {
+                      "$ref": "#/components/schemas/Shipment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed; details lists every missing or malformed field",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": false,
+                  "error": "Shipment data is incomplete or invalid.",
+                  "code": "validation_failed",
+                  "details": [
+                    "delivery.phone must be a valid 10-digit Indian mobile number"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "orderId not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The order already has a shipment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Delhivery rejected the request, was unreachable, or returned an unreadable response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DELHIVERY_API_KEY is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Delhivery timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/validate-shipment": {
+      "post": {
+        "summary": "Validate shipment data (no Delhivery call)",
+        "description": "Runs the same validation as create-shipment without contacting Delhivery. Useful for pre-flight checks in the UI.",
+        "operationId": "validateShipment",
+        "tags": [
+          "Logistics"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateShipmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Valid",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": true,
+                  "valid": true,
+                  "errors": []
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": false,
+                  "valid": false,
+                  "errors": [
+                    "delivery.pin must be a 6-digit pincode"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/track/{awb}": {
+      "get": {
+        "summary": "Track a shipment by AWB",
+        "description": "Delhivery GET /api/v1/packages/json/. The status is normalised to the app's ShipmentStatus values and written back onto the stored order.",
+        "operationId": "trackShipment",
+        "tags": [
+          "Logistics"
+        ],
+        "parameters": [
+          {
+            "name": "awb",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "1234512345678"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tracking data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed AWB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No shipment found for that AWB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Delhivery error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DELHIVERY_API_KEY is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/cancel-shipment": {
+      "post": {
+        "summary": "Cancel a shipment",
+        "description": "Delhivery POST /api/p/edit with cancellation=true. Allowed while the package is Manifested, In Transit, Pending, Open or Scheduled.",
+        "operationId": "cancelShipment",
+        "tags": [
+          "Logistics"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "awb"
+                ],
+                "properties": {
+                  "awb": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "awb": "1234512345678"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": true,
+                  "awb": "1234512345678",
+                  "cancelled": true,
+                  "remark": "Shipment has been cancelled"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or malformed awb",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Delhivery refused the cancellation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DELHIVERY_API_KEY is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logistics/warehouse": {
+      "post": {
+        "summary": "Register a pickup warehouse with Delhivery",
+        "description": "Delhivery POST /api/backend/clientwarehouse/create/. One-time setup per farmer/FPO pickup point; the name registered here is what pickup.warehouseName must match.",
+        "operationId": "createWarehouse",
+        "tags": [
+          "Logistics"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "registered_name",
+                  "phone",
+                  "address",
+                  "city",
+                  "pin"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "registered_name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "pin": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string",
+                    "default": "India"
+                  }
+                }
+              },
+              "example": {
+                "name": "FarmDirect Ghaziabad Hub",
+                "registered_name": "FarmDirect AI",
+                "phone": "9876500001",
+                "address": "Plot 12, Dasna Industrial Area",
+                "city": "Ghaziabad",
+                "state": "Uttar Pradesh",
+                "pin": "201015"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Warehouse registered",
+            "content": {
+              "application/json": {
+                "example": {
+                  "success": true,
+                  "warehouse": {
+                    "name": "FarmDirect Ghaziabad Hub",
+                    "pin": 201015,
+                    "active": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required warehouse fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Delhivery rejected the warehouse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DELHIVERY_API_KEY is not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -236,7 +819,11 @@
           "unit": {
             "type": "string",
             "description": "Unit of measurement",
-            "enum": ["kg", "tonnes", "quintal"],
+            "enum": [
+              "kg",
+              "tonnes",
+              "quintal"
+            ],
             "example": "kg"
           },
           "asking_price": {
@@ -263,14 +850,22 @@
           "intent": {
             "type": "string",
             "description": "Listing intent",
-            "enum": ["sell", "buy"],
+            "enum": [
+              "sell",
+              "buy"
+            ],
             "default": "sell",
             "example": "sell"
           },
           "source": {
             "type": "string",
             "description": "Source of the listing",
-            "enum": ["voice_agent", "manual", "web", "api"],
+            "enum": [
+              "voice_agent",
+              "manual",
+              "web",
+              "api"
+            ],
             "default": "voice_agent",
             "example": "voice_agent"
           }
@@ -302,7 +897,11 @@
           },
           "unit": {
             "type": "string",
-            "enum": ["kg", "tonnes", "quintal"],
+            "enum": [
+              "kg",
+              "tonnes",
+              "quintal"
+            ],
             "example": "kg"
           },
           "asking_price": {
@@ -324,23 +923,39 @@
           },
           "intent": {
             "type": "string",
-            "enum": ["sell", "buy"],
+            "enum": [
+              "sell",
+              "buy"
+            ],
             "example": "sell"
           },
           "source": {
             "type": "string",
-            "enum": ["voice_agent", "manual", "web", "api"],
+            "enum": [
+              "voice_agent",
+              "manual",
+              "web",
+              "api"
+            ],
             "example": "voice_agent"
           },
           "status": {
             "type": "string",
-            "enum": ["created", "active", "sold", "cancelled"],
+            "enum": [
+              "created",
+              "active",
+              "sold",
+              "cancelled"
+            ],
             "example": "created"
           },
           "created_at": {
             "type": "object",
             "description": "Firestore timestamp",
-            "example": { "_seconds": 1788867394, "_nanoseconds": 993000000 }
+            "example": {
+              "_seconds": 1788867394,
+              "_nanoseconds": 993000000
+            }
           }
         }
       },
@@ -390,6 +1005,508 @@
           "error": {
             "type": "string",
             "example": "Validation failed: ..."
+          }
+        }
+      },
+      "ShipmentRequest": {
+        "type": "object",
+        "required": [
+          "delivery"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "Id of an existing order from POST /api/orders. Used as the Delhivery order reference."
+          },
+          "requireOrder": {
+            "type": "boolean",
+            "default": true,
+            "description": "Set false to book a shipment without a stored order."
+          },
+          "pickup": {
+            "type": "object",
+            "required": [],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string",
+                "description": "10-digit Indian mobile; +91/0 prefixes are normalised"
+              },
+              "address": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "pin": {
+                "type": "string",
+                "pattern": "^\\d{6}$"
+              },
+              "country": {
+                "type": "string",
+                "default": "India"
+              },
+              "warehouseName": {
+                "type": "string",
+                "description": "Must exactly match the warehouse registered with Delhivery. Defaults to DELHIVERY_PICKUP_NAME."
+              }
+            },
+            "description": "Farmer / FPO pickup point. Fields omitted here fall back to the produce, farmer record and DELHIVERY_PICKUP_* environment variables."
+          },
+          "delivery": {
+            "type": "object",
+            "required": [
+              "name",
+              "phone",
+              "address",
+              "city",
+              "state",
+              "pin"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string",
+                "description": "10-digit Indian mobile; +91/0 prefixes are normalised"
+              },
+              "address": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "pin": {
+                "type": "string",
+                "pattern": "^\\d{6}$"
+              },
+              "country": {
+                "type": "string",
+                "default": "India"
+              }
+            },
+            "description": "Matched buyer / consignee."
+          },
+          "commodity": {
+            "type": "string",
+            "description": "Produce description. Defaults to the order's allocated listing name."
+          },
+          "quantityKg": {
+            "type": "number",
+            "description": "Defaults to the order's totalQuantityKg. Sent to Delhivery as grams."
+          },
+          "totalAmount": {
+            "type": "number",
+            "description": "Defaults to the order's totalAmount."
+          },
+          "paymentMode": {
+            "type": "string",
+            "enum": [
+              "Prepaid",
+              "COD"
+            ],
+            "default": "Prepaid"
+          },
+          "codAmount": {
+            "type": "number",
+            "description": "Required and > 0 when paymentMode is COD."
+          },
+          "shippingMode": {
+            "type": "string",
+            "enum": [
+              "Surface",
+              "Express"
+            ],
+            "default": "Surface"
+          },
+          "pieces": {
+            "type": "integer",
+            "default": 1
+          },
+          "fragile": {
+            "type": "boolean"
+          },
+          "awb": {
+            "type": "string",
+            "description": "Optional pre-fetched waybill; Delhivery assigns one when omitted."
+          },
+          "sellerGstTin": {
+            "type": "string",
+            "description": "Mandatory on Delhivery order creation. Defaults to DELHIVERY_SELLER_GST_TIN."
+          },
+          "hsnCode": {
+            "type": "string",
+            "description": "Mandatory on Delhivery order creation. Defaults to DELHIVERY_HSN_CODE."
+          },
+          "sellerInvoice": {
+            "type": "string"
+          }
+        }
+      },
+      "Shipment": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "example": "delhivery"
+          },
+          "awb": {
+            "type": "string",
+            "description": "Delhivery waybill number.",
+            "example": "1234512345678"
+          },
+          "orderRef": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "loading",
+              "in_transit",
+              "delayed",
+              "delivered",
+              "cancelled"
+            ]
+          },
+          "paymentMode": {
+            "type": "string"
+          },
+          "codAmount": {
+            "type": "number"
+          },
+          "quantityKg": {
+            "type": "number"
+          },
+          "weightGrams": {
+            "type": "number"
+          },
+          "commodity": {
+            "type": "string"
+          },
+          "sortCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "pickup": {
+            "type": "object"
+          },
+          "delivery": {
+            "type": "object"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ShipmentStatus": {
+        "type": "string",
+        "enum": [
+          "scheduled",
+          "loading",
+          "in_transit",
+          "delayed",
+          "delivered",
+          "cancelled"
+        ],
+        "description": "Delhivery status mapped onto the app's existing ShipmentStatus union (src/types/index.ts)."
+      },
+      "ShipmentTracking": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "awb": {
+            "type": "string"
+          },
+          "orderRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/ShipmentStatus"
+          },
+          "providerStatus": {
+            "type": "string",
+            "nullable": true,
+            "description": "Raw Delhivery status, e.g. \"In Transit\"."
+          },
+          "statusLocation": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusUpdatedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "instructions": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string",
+            "nullable": true
+          },
+          "destination": {
+            "type": "string",
+            "nullable": true
+          },
+          "pickedUpAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "expectedDeliveryAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "consigneeName": {
+            "type": "string",
+            "nullable": true
+          },
+          "trackingEvents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "status": {
+                  "$ref": "#/components/schemas/ShipmentStatus"
+                },
+                "providerStatus": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "location": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "note": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "LogisticsError": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "string",
+            "description": "Human-readable message. Never contains credentials."
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "validation_failed",
+              "invalid_json",
+              "order_not_found",
+              "shipment_exists",
+              "not_configured",
+              "auth_failed",
+              "timeout",
+              "network_error",
+              "malformed_response",
+              "api_error",
+              "not_found",
+              "internal_error"
+            ]
+          },
+          "details": {
+            "description": "Field-level errors, or sanitised provider remarks."
+          }
+        }
+      },
+      "LogisticsParty": {
+        "type": "object",
+        "description": "Sender (farmer/FPO pickup) or receiver (matched buyer) details.",
+        "required": [
+          "name",
+          "phone",
+          "address",
+          "city",
+          "state",
+          "pin"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string",
+            "description": "10-digit Indian mobile; +91/0 prefixes accepted."
+          },
+          "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "pin": {
+            "type": "string",
+            "description": "6-digit pincode."
+          },
+          "country": {
+            "type": "string",
+            "default": "India"
+          },
+          "warehouseName": {
+            "type": "string",
+            "description": "Pickup only. Must exactly match the warehouse registered with Delhivery. Defaults to DELHIVERY_PICKUP_NAME."
+          }
+        }
+      },
+      "CreateShipmentRequest": {
+        "type": "object",
+        "required": [
+          "delivery"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "Id of an order from POST /api/orders. Its commodity, weight and amount are used as the source of truth."
+          },
+          "requireOrder": {
+            "type": "boolean",
+            "default": true,
+            "description": "Set false to book a shipment without a stored order (commodity and quantityKg must then be supplied)."
+          },
+          "pickup": {
+            "$ref": "#/components/schemas/LogisticsParty"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/LogisticsParty"
+          },
+          "commodity": {
+            "type": "string"
+          },
+          "quantityKg": {
+            "type": "number"
+          },
+          "totalAmount": {
+            "type": "number"
+          },
+          "paymentMode": {
+            "type": "string",
+            "enum": [
+              "Prepaid",
+              "COD"
+            ],
+            "default": "Prepaid"
+          },
+          "codAmount": {
+            "type": "number",
+            "description": "Required and > 0 when paymentMode is COD."
+          },
+          "shippingMode": {
+            "type": "string",
+            "enum": [
+              "Surface",
+              "Express"
+            ],
+            "default": "Surface"
+          },
+          "sellerGstTin": {
+            "type": "string",
+            "description": "Defaults to DELHIVERY_SELLER_GST_TIN."
+          },
+          "hsnCode": {
+            "type": "string",
+            "description": "Defaults to DELHIVERY_HSN_CODE."
+          }
+        }
+      },
+      "TrackingResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "orderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "tracking": {
+            "type": "object",
+            "properties": {
+              "awb": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "scheduled",
+                  "loading",
+                  "in_transit",
+                  "delayed",
+                  "delivered",
+                  "cancelled"
+                ]
+              },
+              "providerStatus": {
+                "type": "string",
+                "description": "Raw Delhivery status, e.g. \"In Transit\"."
+              },
+              "statusLocation": {
+                "type": "string",
+                "nullable": true
+              },
+              "statusUpdatedAt": {
+                "type": "string",
+                "nullable": true
+              },
+              "origin": {
+                "type": "string",
+                "nullable": true
+              },
+              "destination": {
+                "type": "string",
+                "nullable": true
+              },
+              "expectedDeliveryAt": {
+                "type": "string",
+                "nullable": true
+              },
+              "trackingEvents": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
           }
         }
       }

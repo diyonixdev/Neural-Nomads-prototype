@@ -4,7 +4,7 @@
 // (or the assistant's own echo) from becoming data.
 const GLUE_WORDS = new Set([
   'ko', 'se', 'mein', 'me', 'ka', 'ki', 'ke', 'par', 'tak', 'bhi', 'hi', 'to', 'na', 'ne', 'liye',
-  'wala', 'wali', 'rakho', 'rakhi', 'rakhna', 'rakhta', 'rakhte', 'rakhu',
+  'wala', 'wali', 'wale', 'rakho', 'rakhi', 'rakhna', 'rakhta', 'rakhte', 'rakhu',
   'de', 'dena', 'dene', 'do', 'dijiye', 'kara',
   'karo', 'kar', 'karna', 'karni', 'kiye', 'liya', 'hua', 'hoti', 'hota', 'honge', 'hogi',
   'aur', 'the', 'a', 'an', 'of', 'for', 'and',
@@ -17,6 +17,12 @@ const GLUE_WORDS = new Set([
   // Common verbs and time adverbs (closed-class grammar words)
   'bechna', 'chahiye', 'chahte', 'chahenge', 'khareed', 'kal', 'aaj', 'parso',
   'subah', 'shaam', 'raat', 'din', 'tak',
+  // Additional common Hindi function words
+  'hai', 'hain', 'ho', 'hun', 'hoon', 'tha', 'thi', 'the', 'hoga', 'hogi', 'honge',
+  'wahan', 'yahan', 'vahan', 'ahan', 'kahan', 'kahin', 'jahan',
+  'abhi', 'ab', 'phir', 'fir', 'uske', 'iske', 'unke', 'inke',
+  'koi', 'kuch', 'sab', 'kam', 'zyada', 'bahut', 'thoda', 'zyaada',
+  'dijiye', 'bataiye', 'bolo', 'batao', 'suno', 'dekho',
 ]);
 
 // A candidate value is rejected when it looks like a sentence fragment or
@@ -44,17 +50,45 @@ const normalizeProduct = (text) => {
   // (contains "aam") are not mistaken for products.
   const has = (pattern) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${pattern})(?![\\p{L}])`, 'u').test(t);
   if (has('tomato|tomatoes|tamatar|टमाटर')) return 'Tomato';
-  if (has('potato|potatoes|aloo|आलू')) return 'Potato';
-  if (has('onion|onions|pyaaz|pyaz|प्याज')) return 'Onion';
+  if (has('potato|potatoes|aloo|aalu|आलू')) return 'Potato';
+  if (has('onion|onions|pyaaz|pyaz|piyaz|प्याज')) return 'Onion';
   if (has('wheat|gehun|gehu|गेहूं')) return 'Wheat';
   if (has('rice|chawal|चावल')) return 'Rice';
-  if (has('cauliflower|gobhi|गोभी')) return 'Cauliflower';
-  if (has('cabbage|patta\\s*gobhi')) return 'Cabbage';
+  if (has('cauliflower|gobhi|phool gobhi|फूल गोभी')) return 'Cauliflower';
+  if (has('cabbage|patta\\s*gobhi|patta\\s*gobi')) return 'Cabbage';
   if (has('carrot|carrots|gajar|गाजर')) return 'Carrot';
   if (has('peas|matar|मटर')) return 'Peas';
   if (has('apple|apples|seb|सेब')) return 'Apple';
-  if (has('banana|bananas|kela|केला')) return 'Banana';
-  if (has('mango|mangoes|aam|आम')) return 'Mango';
+  if (has('banana|bananas|kela|kele|केला')) return 'Banana';
+  if (has('mango|mangoes|aam|aami|आम')) return 'Mango';
+  if (has('maize|corn|makka|makai|makka|मक्का|भुट्टा')) return 'Maize';
+  if (has('cotton|kapas|कपास')) return 'Cotton';
+  if (has('sugarcane|ganna|gur|गन्ना')) return 'Sugarcane';
+  if (has('soybean|soya\\s*bean|soyabean|सोयाबीन')) return 'Soybean';
+  if (has('bajra|bajri|बाजरा')) return 'Bajra';
+  if (has('jowar|jowari|ज्वार')) return 'Jowar';
+  if (has('barley|jau|जौ')) return 'Barley';
+  if (has('mustard|sarson|सरसों')) return 'Mustard';
+  if (has('groundnut|moongphali|peanut|मूंगफली')) return 'Groundnut';
+  if (has('moong|moong\\s*dal|मूंग')) return 'Moong';
+  if (has('chana|chickpea|gram|chana\\s*dal|छोले|चना')) return 'Chana';
+  if (has('masoor|masoor\\s*dal|red\\s*lentil|मसूर')) return 'Masoor';
+  if (has('urad|urad\\s*dal|उड़द')) return 'Urad';
+  if (has('arhar|arhar\\s*dal|toor|tur|अरहर')) return 'Arhar';
+  if (has('mirch|chilli|chili|mirchi|मिर्च')) return 'Mirch';
+  if (has('dhaniya|coriander|धनिया')) return 'Dhaniya';
+  if (has('jeera|cumin|जीरा')) return 'Jeera';
+  if (has('haldi|turmeric|हल्दी')) return 'Haldi';
+  if (has('garlic|lahsun|लहसुन')) return 'Garlic';
+  if (has('ginger|adrak|अदरक')) return 'Ginger';
+  if (has('brinjal|eggplant|baingan|aubergine|बैंगन')) return 'Brinjal';
+  if (has('lauki|bottle\\s*gourd|दोदा')) return 'Bottle Gourd';
+  if (has('torai|ridge\\s*gourd|तोरई')) return 'Ridge Gourd';
+  if (has('parwal|pointed\\s*gourd|परवल')) return 'Parwal';
+  if (has('karela|bitter\\s*gourd|करेला')) return 'Bitter Gourd';
+  if (has('pumpkin|kaddu|कद्दू')) return 'Pumpkin';
+  if (has('spinach|palak|पालक')) return 'Spinach';
+  if (has('methi|fenugreek|मेथी')) return 'Methi';
   // Accept any unknown product: look for a word that isn't a filler word or location/name.
   return extractAnyProduct(text);
 };
@@ -81,6 +115,17 @@ const PRODUCT_FILLERS = new Set([
   'galat','kuch','sab','fasal','saman','item','product','crop',
   'quantity','qty','amount','badlao',
   'want','wants','need','needs','have','has','had','give','giving','getting','is','are','was','were','am','be','been','being','do','does','did','will','would','can','could','should','may','might','must','shall',
+  // Additional common Hindi function words / fillers
+  'hai','hain','ho','hun','hoon','tha','thi','the','hoga','hogi','honge',
+  'wahan','yahan','kahan','kahin','jahan',
+  'abhi','ab','phir','uske','iske','unke','inke',
+  'koi','kam','zyada','bahut','thoda','zyaada',
+  'dijiye','bataiye','bolo','batao','suno','dekho',
+  'wala','wali','wale','rakho','de','dena','dene','do',
+  'ji','aap','aapko','aapka','aapki','aapne','mujhe','main','mera','meri','mere',
+  'hum','tum','yeh','ye','woh','wo',
+  'nahi','nahin','haan','bilkul','sahi','galat','sab','kuch',
+  'kitna','kitne','ek','baar','teen','chaar','paanch',
   // NOTE: Do NOT hardcode person names here — product extraction uses dynamic
   // nameWords exclusion (detected via extractNameFromText) to avoid treating a
   // farmer's name as a crop. Hardcoded lists break for ANY unseen name.
@@ -131,14 +176,21 @@ const extractAnyProduct = (text) => {
 };
 
 const parseQuantity = (text) => {
+  // If text clearly indicates a price (not quantity), do not extract quantity.
+  if (/(?:₹|rs\.?|inr|रु\.?|rupaye|rupaiya|per\s*kg|per\s*kilo)/i.test(text.toLowerCase())) {
+    return { quantity: null, unit: null };
+  }
   const norm = text.toLowerCase().replace(/\s+/g, ' ');
-  let m = norm.match(/(\d+(?:\.\d+)?)\s*(kg|kilo|kilos|kilogram|kilograms|किलो|किलोग्राम)(?:\s|,|\.|$)/)
-    || norm.match(/(\d+(?:\.\d+)?)\s*(ton|tons|tonne|tonnes|टन)(?:\s|,|\.|$)/)
-    || norm.match(/(\d+(?:\.\d+)?)\s*(quintal|qtl|क्विंटल)(?:\s|,|\.|$)/)
-    || norm.match(/(\d+(?:\.\d+)?)\s*(litre|liter|litres|liters|लीटर)(?:\s|,|\.|$)/)
-    || norm.match(/(\d+(?:\.\d+)?)\s*(piece|pieces|पीस)(?:\s|,|\.|$)/)
-    || norm.match(/(\d+(?:\.\d+)?)\s*(bag|bags|bori|boriyon|बोरी|बोरियां)(?:\s|,|\.|$)/)
-    || norm.match(/(\d+(?:\.\d+)?)\s*(dozen|darjan|दर्जन)(?:\s|,|\.|$)/);
+  // Unit delimiter is optional (\b) so "500 kilo tamatar hai" matches
+  // alongside the original "500 kilo hai" and "500kg, "
+  const UB = '(?:[\\s,.;:!?)\\]]|$)';  // unit-boundary: whitespace, punctuation, or end
+  let m = norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(kg|kilo|kilos|kilogram|kilograms|किलो|किलोग्राम)${UB}`))
+    || norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(ton|tons|tonne|tonnes|टन)${UB}`))
+    || norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(quintal|qtl|क्विंटल)${UB}`))
+    || norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(litre|liter|litres|liters|लीटर)${UB}`))
+    || norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(piece|pieces|पीस)${UB}`))
+    || norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(bag|bags|bori|boriyon|बोरी|बोरियां)${UB}`))
+    || norm.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(dozen|darjan|दर्जन)${UB}`));
   if (!m) return { quantity: null, unit: null };
   const qty = Number(m[1]);
   const raw = m[2].toLowerCase();
@@ -359,6 +411,15 @@ const detectAnyLocation = (text) => {
     'हापुड़': 'Hapur', 'बुलंदशहर': 'Bulandshahr', 'सोनीपत': 'Sonipat',
     'पानीपत': 'Panipat', 'करनाल': 'Karnal', 'गुरुग्राम': 'Gurugram',
     'मुरादनगर': 'Muradnagar', 'दसना': 'Dasna', 'मोदीनगर': 'Modinagar',
+    'आगरा': 'Agra', 'लखनऊ': 'Lucknow', 'कानपुर': 'Kanpur',
+    'प्रयागराज': 'Prayagraj', 'वाराणसी': 'Varanasi', 'पटना': 'Patna',
+    'रांची': 'Ranchi', 'भोपाल': 'Bhopal', 'इंदौर': 'Indore',
+    'जयपुर': 'Jaipur', 'जोधपुर': 'Jodhpur', 'बैंगलोर': 'Bangalore',
+    'हैदराबाद': 'Hyderabad', 'चेन्नई': 'Chennai', 'मुंबई': 'Mumbai',
+    'पुणे': 'Pune', 'अहमदाबाद': 'Ahmedabad', 'सूरत': 'Surat',
+    'कोलकाता': 'Kolkata', 'चंडीगढ़': 'Chandigarh', 'लुधियाना': 'Ludhiana',
+    'अमृतसर': 'Amritsar', 'जालंधर': 'Jalandhar', 'देहरादून': 'Dehradun',
+    'शिमला': 'Shimla', 'नागपुर': 'Nagpur', 'विशाखापत्तनम': 'Visakhapatnam',
   };
   // Check Devanagari map first
   const devMatch = Object.entries(devanagariMap).find(([dev]) => text.includes(dev));
@@ -382,10 +443,15 @@ const detectAnyLocation = (text) => {
     ...Array.from(GLUE_WORDS),
   ]);
   const PRODUCT_WORDS = new Set([
-    'tomato','tomatoes','tamatar','potato','potatoes','aloo','onion','onions','pyaaz','pyaz',
-    'wheat','gehun','gehu','rice','chawal','cauliflower','gobhi','cabbage','carrot','gajar',
-    'peas','matar','apple','seb','banana','kela','mango','aam','maize','makka','corn','cotton','kapas',
-    'sugarcane','ganna','soybean','soyabean','bajra','jowar','barley','jau','mustard','sarson','groundnut','moongphali','moong','dal','chana','masoor','urad','arhar','mirch','chilli','dhaniya','coriander','jeera','cumin','haldi','turmeric',
+    'tomato','tomatoes','tamatar','potato','potatoes','aloo','aalu','onion','onions','pyaaz','pyaz','piyaz',
+    'wheat','gehun','gehu','rice','chawal','cauliflower','gobhi','phool','cabbage','patta','carrot','gajar',
+    'peas','matar','apple','seb','banana','kela','mango','aam','maize','makka','corn','bhutta','cotton','kapas',
+    'sugarcane','ganna','gur','soybean','soya','soyabean','bajra','bajri','jowar','jowari','barley','jau',
+    'mustard','sarson','groundnut','moongphali','peanut','moong','chana','chickpea','gram','masoor','urad',
+    'arhar','toor','tur','mirch','mirchi','chilli','chili','dhaniya','coriander','jeera','cumin','haldi','turmeric',
+    'garlic','lahsun','ginger','adrak','brinjal','eggplant','baingan','aubergine',
+    'lauki','bottle','torai','ridge','parwal','pointed','karela','bitter','pumpkin','kaddu',
+    'spinach','palak','methi','fenugreek',
     // Quality descriptors — never place names
     'achhi','acchi','accha','achha','badhiya','badiya','shandar','uttam','kharab','bekar',
   ]);

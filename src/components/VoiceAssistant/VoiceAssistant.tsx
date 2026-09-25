@@ -114,6 +114,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
   // listening session) can check the CURRENT values synchronously.
   const isSpeakingRef = useRef(false);
   const phaseRef = useRef<AssistantPhase>('idle');
+  const startListeningRef = useRef<() => void>(() => {});
+  const bargeInRef = useRef(false); // true when user interrupted TTS (barge-in)
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -160,7 +162,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     (text: string) => {
       if (!hasSpeechSynthesis() || !text) return;
       try {
-        suppressRecognition();
+        // Do NOT suppressRecognition here — keep mic active so barge-in
+        // (user speaking during TTS) can be detected and handled.
+        bargeInRef.current = false; // reset for new TTS utterance
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         const langHint = detectResponseLanguage(text);
@@ -177,6 +181,33 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         utter.onend = () => {
           setIsSpeaking(false);
           setPhase('idle');
+          // If barge-in happened, the mic is already running and capturing
+          // user speech — do NOT auto-restart mic (it's already active).
+          if (bargeInRef.current) {
+            bargeInRef.current = false;
+            return;
+          }
+          // Auto-restart mic after TTS ends so the user can speak immediately
+          // without tapping the mic button. This is the normal flow (non-barge-in).
+          // Guard: only restart if not already listening, not processing, and not in a terminal state.
+          if (
+            !isProcessingRef.current &&
+            !submitInProgressRef.current &&
+            phaseRef.current !== 'listening' &&
+            phaseRef.current !== 'error'
+          ) {
+            // Small delay to let TTS audio fully stop before restarting mic
+            setTimeout(() => {
+              if (
+                !isProcessingRef.current &&
+                !submitInProgressRef.current &&
+                phaseRef.current !== 'listening' &&
+                phaseRef.current !== 'error'
+              ) {
+                startListeningRef.current();
+              }
+            }, 300);
+          }
         };
         utter.onerror = () => {
           setIsSpeaking(false);
@@ -202,7 +233,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         setPhase('idle');
       }
     },
-    [suppressRecognition]
+    []
   );
 
   const resetForNext = useCallback(() => {
@@ -224,6 +255,20 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     setPhase('idle');
     setIsSpeaking(false);
     isProcessingRef.current = false;
+    // Clean session listing for a genuinely new listing/conversation
+    const s = getSession(sessionIdRef.current);
+    if (s) {
+      s.listing.farmer_name = null;
+      s.listing.phone = null;
+      s.listing.product = null;
+      s.listing.quantity = null;
+      s.listing.unit = null;
+      s.listing.asking_price = null;
+      s.listing.price_unit = null;
+      s.listing.location = null;
+      s.listing.quality = null;
+      s.listing.intent = 'sell';
+    }
   }, [clearSilenceTimeout]);
 
   const handleResetSession = useCallback(() => {
@@ -454,6 +499,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
           return;
         }
 
+        console.log('[TRACE] RAW STT TRANSCRIPT:', JSON.stringify(trimmed));
+        console.log('[TRACE] NORMALIZED TRANSCRIPT:', JSON.stringify(trimmed));
+        console.log('[TRACE] SESSION ID:', sessionIdRef.current);
         const result = await voiceAgent.processTurn(sessionIdRef.current, trimmed);
         console.log('[FRONTEND] conversation result:', result);
 
@@ -568,6 +616,18 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
 
     stopSpeaking();
     clearSilenceTimeout();
+    // Clean up any leaked previous SpeechRecognition before creating new one
+    // (prevents old continuous session from interfering with restart guard).
+    const oldRec = recognitionRef.current;
+    if (oldRec) {
+      try {
+        oldRec.onresult = null;
+        oldRec.onend = null;
+        oldRec.onerror = null;
+        oldRec.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
     setError(null);
     setErrorCode(null);
     setInterim('');
@@ -589,10 +649,18 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     let micAllowed = true;
     recognition.onaudiostart = () => {
       if (isSpeakingRef.current) {
-        micAllowed = false;
-        try {
-          recognition.stop();
-        } catch {}
+        // BARGE-IN DETECTED: User started speaking while AI is talking.
+        // Immediately stop TTS so the user can be heard.
+        bargeInRef.current = true;
+        if (hasSpeechSynthesis()) {
+          window.speechSynthesis.cancel();
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+        }
+        // Update phase so the UI shows "listening" instead of "speaking"
+        setPhase('listening');
+        // Do NOT stop recognition — let it continue to capture user speech.
+        // The onresult handler will process the user's actual input.
       }
     };
 
@@ -607,9 +675,10 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     };
 
     recognition.onresult = (event: any) => {
-      // Assistant TTS is active — anything captured is the assistant's own
-      // voice (or its echo), never the farmer. Drop it unconditionally.
-      if (isSpeakingRef.current || phaseRef.current !== 'listening') return;
+      // Only block results if we're not in listening phase. The isSpeakingRef
+      // guard was removed to enable barge-in: when the user speaks during TTS,
+      // onaudiostart stops TTS and onresult processes the user's speech.
+      if (phaseRef.current !== 'listening') return;
       let newInterim = '';
       let newFinal = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -693,16 +762,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       clearSilenceTimeout();
       const candidate = finalTranscriptRef.current || interimRef.current;
       const filtered = candidate && candidate !== 'सुन रहा हूँ...' && candidate !== 'Listening...' ? candidate.trim() : '';
-      // If the mic captured only assistant audio (TTS active or mic never
-      // allowed after TTS started), discard it — no echo may become "farmer".
-      if (filtered && (isSpeakingRef.current || !micAllowed)) {
-        finalTranscriptRef.current = '';
-        interimRef.current = '';
-        setTranscript('');
-        setInterim('');
-        setPhase((p) => (p === 'listening' ? 'idle' : p));
-        return;
-      }
+      // With barge-in support, we no longer discard results based on TTS state.
+      // The onaudiostart handler stops TTS when the user speaks, and onresult
+      // processes the user's speech. The isProcessingRef guard prevents duplicates.
       if (!filtered) {
         if (!isProcessingRef.current && !convResult && !response) {
           // Only show no-speech if we haven't already processed
@@ -727,6 +789,9 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
       handleError('mic-start', language === 'hi' ? 'माइक शुरू नहीं हो पाया।' : 'Could not start microphone.');
     }
   }, [clearSilenceTimeout, getEffectiveSTTLang, language, processTranscript, response, stopSpeaking, handleError]);
+
+  // Keep startListeningRef in sync so speak() can auto-restart mic after TTS
+  useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
   const handleTypedSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1064,7 +1129,20 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
         )}
 
         {/* Confirmation card - shows when state is CONFIRMING */}
-        {convState === 'CONFIRMING' && convResult?.listing && (
+        {convState === 'CONFIRMING' && convResult?.listing && (() => {
+          console.log('[TRACE] CONFIRMATION DATA:', JSON.stringify({
+            farmer_name: convResult.listing.farmer_name ?? null,
+            phone: convResult.listing.phone ?? null,
+            product: convResult.listing.product ?? null,
+            quantity: convResult.listing.quantity ?? null,
+            unit: convResult.listing.unit ?? null,
+            asking_price: convResult.listing.asking_price ?? null,
+            price_unit: convResult.listing.price_unit ?? null,
+            location: convResult.listing.location ?? null,
+            quality: convResult.listing.quality ?? null,
+            intent: convResult.listing.intent ?? null,
+          }));
+          return (
           <Card className="w-full max-w-lg mt-4 bg-white border-emerald-200 p-5 text-left shadow-sm">
             <div className="text-center mb-3">
               <p className="text-sm font-bold text-slate-900 flex items-center justify-center gap-2">
@@ -1117,7 +1195,8 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
               </Button>
             </div>
           </Card>
-        )}
+          );
+        })()}
 
         {/* Final collected listing — structured Phase 1 schema shown in dev UI */}
         {convState === 'SUCCESS' && finalListing && (

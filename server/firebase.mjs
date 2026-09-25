@@ -4,12 +4,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+console.log('[DEBUG] firebase.mjs module executing');
+console.log('[DEBUG] process.cwd() =', process.cwd());
+
+// --- Load .env from project root ---
 const __dirnameEnv = path.dirname(fileURLToPath(import.meta.url));
+console.log('[DEBUG] __dirnameEnv =', __dirnameEnv);
+
 const candidates = [path.resolve(__dirnameEnv, '..', '.env'), path.resolve(process.cwd(), '.env')];
+let envLoadedFrom = null;
 for (const p of candidates) {
   try {
     if (fs.existsSync(p)) {
       const raw = fs.readFileSync(p, 'utf8');
+      
       raw.split('\n').forEach((line) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return;
@@ -22,49 +30,77 @@ for (const p of candidates) {
         }
         if (!process.env[key]) process.env[key] = val;
       });
+      envLoadedFrom = p;
       break;
     }
   } catch {}
 }
+console.log('[DEBUG] .env loaded from:', envLoadedFrom ?? 'NOWHERE');
 
+// --- Check all env vars ---
+console.log('[DEBUG] FIREBASE_SERVICE_ACCOUNT_PATH =', process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? '(undefined)');
+console.log('[DEBUG] Length of FIREBASE_SERVICE_ACCOUNT_PATH =', (process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '').length);
+
+// --- Resolve service account path ---
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-// Serverless hosts (Vercel) have no place to put a key file, so the whole service
-// account JSON can be supplied inline instead, base64-encoded or as raw JSON.
-const serviceAccountInline = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
 let db = null;
 let firebaseApp = null;
 
-const readServiceAccount = () => {
-  if (serviceAccountInline) {
-    const trimmed = serviceAccountInline.trim();
-    return trimmed.startsWith('{') ? trimmed : Buffer.from(trimmed, 'base64').toString('utf8');
-  }
-  return fs.readFileSync(serviceAccountPath, 'utf8');
-};
+console.log('[Firebase] Initializing...');
+console.log(`[Firebase] Service account path: ${serviceAccountPath ?? '(not set)'}`);
 
-if (!serviceAccountInline && !serviceAccountPath) {
-  console.warn('[Firebase] Neither FIREBASE_SERVICE_ACCOUNT_JSON nor FIREBASE_SERVICE_ACCOUNT_PATH is set in environment.');
-} else if (!serviceAccountInline && !fs.existsSync(serviceAccountPath)) {
-  console.error(`[Firebase] Service account credential file not found at path: ${serviceAccountPath}`);
+if (!serviceAccountPath) {
+  console.error('[Firebase] ERROR: FIREBASE_SERVICE_ACCOUNT_PATH is not set in .env');
+  console.error('[Firebase] Set it in .env to point to your Firebase service-account JSON.');
 } else {
-  try {
-    const serviceAccountRaw = readServiceAccount();
-    const serviceAccount = JSON.parse(serviceAccountRaw);
+  const normalizedPath = serviceAccountPath.replace(/\//g, path.sep).replace(/\\/g, path.sep);
+  const resolvedPath = path.resolve(normalizedPath);
+  console.log(`[Firebase] Normalized path: ${normalizedPath}`);
+  console.log(`[Firebase] Resolved path: ${resolvedPath}`);
 
-    if (!admin.getApps().length) {
-      firebaseApp = admin.initializeApp({
-        credential: admin.cert(serviceAccount),
-      });
-    } else {
-      firebaseApp = admin.app();
+  const exists = fs.existsSync(resolvedPath);
+  console.log(`[DEBUG] Service account file exists: ${exists}`);
+
+  if (!exists) {
+    console.error(`[Firebase] ERROR: Service account file NOT FOUND at: ${resolvedPath}`);
+    console.error('[Firebase] Download it from Firebase Console > Project Settings > Service accounts > Generate new private key.');
+  } else {
+    try {
+      const serviceAccountRaw = fs.readFileSync(resolvedPath, 'utf8');
+      const serviceAccount = JSON.parse(serviceAccountRaw);
+
+      const requiredFields = ['type', 'project_id', 'private_key', 'client_email'];
+      const missing = requiredFields.filter((f) => !serviceAccount[f]);
+      if (missing.length > 0) {
+        console.error(`[Firebase] ERROR: Service account JSON is missing fields: ${missing.join(', ')}`);
+      } else if (serviceAccount.type !== 'service_account') {
+        console.error(`[Firebase] ERROR: Service account JSON has type="${serviceAccount.type}", expected "service_account"`);
+      } else {
+        console.log('[Firebase] Service account JSON is valid');
+
+        if (!admin.getApps().length) {
+          firebaseApp = admin.initializeApp({
+            credential: admin.cert(serviceAccount),
+          });
+          console.log('[Firebase] admin.initializeApp() completed');
+        } else {
+          firebaseApp = admin.app();
+          console.log('[Firebase] Reusing existing Firebase app');
+        }
+
+        db = getFirestore(firebaseApp);
+        console.log('[Firebase] Firestore initialized successfully');
+      }
+    } catch (err) {
+      console.error(`[Firebase] ERROR: Failed to initialize Firebase Admin SDK: ${err.message}`);
+      console.error(`[Firebase] Error stack: ${err.stack}`);
     }
-
-    db = getFirestore(firebaseApp);
-    console.log('[Firebase] Firebase Admin SDK initialized successfully.');
-  } catch (err) {
-    console.error(`[Firebase] Failed to initialize Firebase Admin SDK: ${err.message}`);
   }
+}
+
+if (!db) {
+  console.error('[Firebase] WARNING: Firestore is NOT available. db is null. Writes will fail.');
 }
 
 export { admin, db, firebaseApp };

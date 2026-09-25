@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createListing, getListingById } from './listingService.mjs';
 import { db } from './firebase.mjs';
 import { processTurn, getSession, deleteSession, STATES } from './conversationManager.mjs';
+import { handleIncomingCall, handleSpeechResult } from './twilioVoice.mjs';
 
 // --- Simple .env loader (no extra dependency) ---
 const __dirnameEnv = path.dirname(fileURLToPath(import.meta.url));
@@ -1765,6 +1766,21 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
       'Access-Control-Allow-Origin': getAllowedOrigin(request),
     });
     response.end(html);
+    return;
+  }
+
+  // ===== TWILIO INCOMING CALL =====
+  if (method === 'POST' && pathname === '/api/twilio/incoming') {
+    console.log('[TWILIO] Incoming call webhook received');
+    // Delegate to twilioVoice adapter
+    await handleIncomingCall(request, response);
+    return;
+  }
+
+  // ===== TWILIO SPEECH RESULT =====
+  if (method === 'POST' && pathname === '/api/twilio/handle') {
+    console.log('[TWILIO] Speech result webhook received');
+    await handleSpeechResult(request, response);
     return;
   }
 

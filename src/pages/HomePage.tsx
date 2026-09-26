@@ -266,12 +266,13 @@ export const HomePage: React.FC = () => {
     },
     {
       icon: BarChart3,
-      title: language === 'hi' ? 'मांग अंतर्दृष्टि' : 'Demand Insights',
-      desc: language === 'hi' ? 'AI मांग पूर्वानुमान और मूल्य सुझाव' : 'AI demand forecast & price suggestion for next harvest',
-      cta: language === 'hi' ? 'इनसाइट्स' : 'Insights',
-      to: '/farmer?tab=demand',
+      title: language === 'hi' ? 'मांग पूर्वानुमान' : 'Demand Forecasting',
+      desc: language === 'hi' ? 'AI मांग पूर्वानुमान और थोक मूल्य सुझाव' : 'AI demand forecast, arrival tracking & price suggestions',
+      cta: language === 'hi' ? 'पूर्वानुमान देखें' : 'View Forecast',
+      to: '/farmer/demand',
       color: 'purple',
       accent: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+      highlight: 'Live APMC AI',
     },
   ];
 

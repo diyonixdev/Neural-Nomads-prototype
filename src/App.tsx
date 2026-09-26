@@ -21,6 +21,7 @@ import { FarmerVoicePage } from './pages/farmer/FarmerVoicePage';
 import { FarmerBuyersPage } from './pages/farmer/FarmerBuyersPage';
 import { FarmerConnectionPage } from './pages/farmer/FarmerConnectionPage';
 import { FarmerOrderPage } from './pages/farmer/FarmerOrderPage';
+import { FarmerDemandPage } from './pages/farmer/FarmerDemandPage';
 import { ProductDetailsPage } from './pages/ProductDetailsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
@@ -50,10 +51,14 @@ export const App: React.FC = () => {
 
             {/* Farmer Routes */}
             <Route path="farmer" element={<FarmerDashboardPage />} />
+            <Route path="farmer/demand" element={<FarmerDemandPage />} />
             <Route path="farmer/voice" element={<FarmerVoicePage />} />
             <Route path="farmer/buyers" element={<FarmerBuyersPage />} />
             <Route path="farmer/connection" element={<FarmerConnectionPage />} />
             <Route path="farmer/order" element={<FarmerOrderPage />} />
+
+            {/* Demand Forecasting & Market Intelligence */}
+            <Route path="demand-forecast" element={<FarmerDemandPage />} />
 
             {/* Buyer Marketplace — product details (isolated via productService) */}
             <Route path="product/:id" element={<ProductDetailsPage />} />

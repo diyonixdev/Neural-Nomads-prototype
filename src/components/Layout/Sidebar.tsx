@@ -30,6 +30,7 @@ export const Sidebar: React.FC = () => {
   const consumerNav = [
     { to: '/consumer', icon: LayoutDashboard, label: 'Overview', labelHi: 'डैशबोर्ड' },
     { to: '/login', icon: ShieldCheck, label: 'Kisan Portal & e-KYC', labelHi: 'किसान पोर्टल (लॉगिन)', highlight: true },
+    { to: '/demand-forecast', icon: BarChart3, label: 'Market Demand & Trends', labelHi: 'बाजार मांग व रुझान' },
     { to: '/consumer/voice', icon: Mic, label: 'Voice Assistant', labelHi: 'वॉयस सहायक' },
     { to: '/consumer/matches', icon: Users, label: 'Farmer Matches', labelHi: 'किसान मिलान' },
     { to: '/consumer/call', icon: PhoneCall, label: 'Direct Call', labelHi: 'सीधी बातचीत' },
@@ -44,13 +45,13 @@ export const Sidebar: React.FC = () => {
   const farmerNav = [
     { to: '/farmer', icon: LayoutDashboard, label: 'Dashboard', labelHi: 'डैशबोर्ड', end: true },
     { to: '/login', icon: ShieldCheck, label: 'Kisan Portal & e-KYC', labelHi: 'किसान पोर्टल (लॉगिन)', highlight: true },
+    { to: '/farmer/demand', icon: BarChart3, label: 'Demand Forecasting', labelHi: 'मांग पूर्वानुमान' },
     { to: '/farmer?tab=my-produce', icon: Leaf, label: 'My Produce', labelHi: 'मेरी उपज' },
     { to: '/farmer?tab=add-produce', icon: Plus, label: 'Add Produce', labelHi: 'उपज जोड़ें' },
     { to: '/farmer?tab=inventory', icon: Package, label: 'Inventory', labelHi: 'इन्वेंटरी' },
     { to: '/farmer/buyers', icon: Users, label: 'Buyer Requests', labelHi: 'खरीदार अनुरोध' },
     { to: '/farmer/order', icon: ClipboardList, label: 'Orders', labelHi: 'ऑर्डर' },
     { to: '/farmer?tab=earnings', icon: Wallet, label: 'Earnings', labelHi: 'कमाई' },
-    { to: '/farmer?tab=demand', icon: BarChart3, label: 'Demand Insights', labelHi: 'मांग अंतर्दृष्टि' },
     { to: '/farmer/voice', icon: Mic, label: 'Voice Add', labelHi: 'वॉयस जोड़ें' },
     { to: '/farmer/connection', icon: PhoneCall, label: 'Direct Connect', labelHi: 'सीधा संपर्क' },
   ];

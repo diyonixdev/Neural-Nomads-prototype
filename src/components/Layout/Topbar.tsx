@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useDemo } from '../../context/DemoContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useLocation, NavLink } from 'react-router-dom';
-import { Sprout, RotateCcw, Globe, ShoppingBag, Tractor, Menu, X, Sparkles, Mic, Store, User, ShieldCheck } from 'lucide-react';
+import { Sprout, RotateCcw, Globe, ShoppingBag, Tractor, Menu, X, Sparkles, Mic, Store, User, ShieldCheck, BarChart3 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 export const Topbar: React.FC = () => {
@@ -30,6 +30,7 @@ export const Topbar: React.FC = () => {
     { label: language === 'hi' ? 'होम' : 'Home', labelEn: 'Home', to: '/', end: true },
     { label: language === 'hi' ? 'बाज़ार' : 'Marketplace', labelEn: 'Marketplace', to: '/consumer/matches', end: false },
     { label: language === 'hi' ? 'किसानों के लिए' : 'For Farmers', labelEn: 'For Farmers', to: '/farmer', end: false },
+    { label: language === 'hi' ? 'मांग पूर्वानुमान' : 'Demand Forecast', labelEn: 'Demand Forecast', to: '/farmer/demand', end: false },
     { label: language === 'hi' ? 'AI सहायक' : 'AI Assistant', labelEn: 'AI Assistant', to: role === 'farmer' ? '/farmer/voice' : '/consumer/voice', end: false },
     { label: language === 'hi' ? 'किसान पोर्टल' : 'Kisan Portal', labelEn: 'Kisan Portal', to: '/login', end: false },
   ];
@@ -238,6 +239,7 @@ export const Topbar: React.FC = () => {
                   {item.labelEn === 'Home' && <Store size={16} />}
                   {item.labelEn === 'Marketplace' && <ShoppingBag size={16} />}
                   {item.labelEn === 'For Farmers' && <Tractor size={16} />}
+                  {item.labelEn === 'Demand Forecast' && <BarChart3 size={16} />}
                   {item.labelEn === 'AI Assistant' && <Mic size={16} />}
                   {item.labelEn === 'Kisan Portal' && <ShieldCheck size={16} />}
                   <span>{item.label}</span>

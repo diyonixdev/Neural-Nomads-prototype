@@ -1,5 +1,6 @@
 import type { Address, Buyer, BuyerRequirement, Farmer, Produce, ProduceGrade } from '../types';
 import { mockBuyers, mockBuyerRequirements, mockFarmers, mockProduceListings } from '../data/mockData';
+import { generateDemandForecast, type ForecastTimeframe, type ForecastRegion } from '../data/demandForecastData';
 
 export type ParsedIntentType = 'BUYER' | 'SELLER' | 'UNKNOWN';
 export type ParsedUnit = 'kg' | 'tonnes';
@@ -821,11 +822,64 @@ export const aggregateSupply = (requirement: RequirementInput | BuyerRequirement
 
 export interface DemandForecastResult {
   product: string;
+  nameHi?: string;
+  timeframe?: ForecastTimeframe;
+  region?: ForecastRegion;
   predictedDemandKg: number;
+  expectedArrivalsKg?: number;
+  marketDeficitSurplusKg?: number;
   forecastPeriod: string;
+  forecastPeriodHi?: string;
   trend: 'Increasing' | 'Stable' | 'Decreasing';
+  trendPct?: number;
+  currentModalPrice?: number;
+  mspPrice?: number | null;
+  projectedPriceAvg?: number;
+  projectedPriceMin?: number;
+  projectedPriceMax?: number;
+  confidencePct?: number;
+  statusText?: string;
+  statusTextHi?: string;
   recommendation: string;
-  chartData: Array<{ week: string, demand: number }>;
+  recommendationHi?: string;
+  harvestWindow?: string;
+  harvestWindowHi?: string;
+  drivers?: string[];
+  driversHi?: string[];
+  coldStorage?: {
+    viable: boolean;
+    durationDays: number;
+    dailyStorageCostPerKg: number;
+    projectedGainPerKg: number;
+    netBenefitPerKg: number;
+    advice: string;
+    adviceHi: string;
+  };
+  mandis?: Array<{
+    name: string;
+    location: string;
+    distanceKm: number;
+    modalPrice: number;
+    transportCostPerKg: number;
+    netReturnPerKg: number;
+    dailyArrivalTonnes: number;
+    isBest: boolean;
+  }>;
+  chartData: Array<{ 
+    week?: string; 
+    period?: string;
+    periodLabel?: string;
+    demand: number; 
+    demandKg?: number;
+    arrivals?: number;
+    arrivalKg?: number;
+    price?: number;
+    projectedPrice?: number;
+    priceMin?: number;
+    priceMax?: number;
+    msp?: number;
+    deficitKg?: number;
+  }>;
 }
 
 export const aggregateSupplyAsync = async (requirement: RequirementInput | BuyerRequirement | ParsedVoiceIntent): Promise<AggregatedSupplyResult> => {
@@ -844,22 +898,75 @@ export const aggregateSupplyAsync = async (requirement: RequirementInput | Buyer
   }
 };
 
-export const fetchDemandForecast = async (product: string): Promise<DemandForecastResult> => {
+export const fetchDemandForecast = async (
+  product: string,
+  timeframe: ForecastTimeframe = '30d',
+  region: ForecastRegion = 'ncr'
+): Promise<DemandForecastResult> => {
   try {
-    const res = await fetch(`/api/forecast?product=${encodeURIComponent(product)}`);
-    if (!res.ok) throw new Error('API failed');
-    return await res.json();
+    const res = await fetch(`/api/forecast?product=${encodeURIComponent(product)}&timeframe=${encodeURIComponent(timeframe)}&region=${encodeURIComponent(region)}`);
+    if (res.ok) {
+      const data = await res.json();
+      // Ensure chartData has both week and period properties for compatibility
+      if (Array.isArray(data.chartData)) {
+        data.chartData = data.chartData.map((d: any) => ({
+          ...d,
+          week: d.week || d.period || 'W',
+          demand: d.demand !== undefined ? d.demand : (d.demandKg || 0),
+        }));
+      }
+      return data;
+    }
   } catch (e) {
-    console.error('fetchDemandForecast error', e);
-    return {
-      product,
-      predictedDemandKg: 500,
-      forecastPeriod: 'Next Month',
-      trend: 'Stable',
-      recommendation: 'Maintain current production/stock.',
-      chartData: []
-    };
+    console.warn('Backend /api/forecast failed or unavailable, using high-fidelity local forecasting engine', e);
   }
+
+  // High-fidelity fallback guarantee — Never returns empty charts or blank screens!
+  const localForecast = generateDemandForecast(product, timeframe, region);
+  return {
+    product: localForecast.crop.name,
+    nameHi: localForecast.crop.nameHi,
+    timeframe: localForecast.timeframe,
+    region: localForecast.region,
+    predictedDemandKg: localForecast.predictedDemandKg,
+    expectedArrivalsKg: localForecast.expectedArrivalsKg,
+    marketDeficitSurplusKg: localForecast.marketDeficitSurplusKg,
+    forecastPeriod: localForecast.forecastPeriod,
+    forecastPeriodHi: localForecast.forecastPeriodHi,
+    trend: localForecast.trend,
+    trendPct: localForecast.trendPct,
+    currentModalPrice: localForecast.currentModalPrice,
+    mspPrice: localForecast.mspPrice,
+    projectedPriceAvg: localForecast.projectedPriceAvg,
+    projectedPriceMin: localForecast.projectedPriceMin,
+    projectedPriceMax: localForecast.projectedPriceMax,
+    confidencePct: localForecast.confidencePct,
+    statusText: localForecast.statusText,
+    statusTextHi: localForecast.statusTextHi,
+    recommendation: localForecast.recommendation,
+    recommendationHi: localForecast.recommendationHi,
+    harvestWindow: localForecast.harvestWindow,
+    harvestWindowHi: localForecast.harvestWindowHi,
+    drivers: localForecast.drivers,
+    driversHi: localForecast.driversHi,
+    coldStorage: localForecast.coldStorage,
+    mandis: localForecast.mandis,
+    chartData: localForecast.chartData.map(c => ({
+      week: c.period,
+      period: c.period,
+      periodLabel: c.periodLabel,
+      demand: c.demandKg,
+      demandKg: c.demandKg,
+      arrivals: c.arrivalKg,
+      arrivalKg: c.arrivalKg,
+      price: c.projectedPrice,
+      projectedPrice: c.projectedPrice,
+      priceMin: c.priceMin,
+      priceMax: c.priceMax,
+      msp: c.msp,
+      deficitKg: c.deficitKg,
+    })),
+  };
 };
 
 export const placeBulkOrderAsync = async (allocations: SupplyAllocation[], buyerId: string = 'b-unknown'): Promise<any> => {

@@ -8,6 +8,7 @@ import { AddProduceForm } from '../../components/farmer/AddProduceForm';
 import { farmerInventoryService } from '../../services/farmerInventoryService';
 import { getProduceImage, getPricing, getAvailabilityStatus, FALLBACK_PRODUCE_IMAGE } from '../../services/productService';
 import { FarmerHelpPanel } from '../../components/farmer/FarmerHelpPanel';
+import { DemandForecastingView } from '../../components/farmer/DemandForecastingView';
 import { mockBuyerRequirements, mockBuyers, mockOrders } from '../../data/mockData';
 import { matchBuyers, fetchDemandForecast } from '../../services/aiService';
 import type { DemandForecastResult } from '../../services/aiService';
@@ -673,122 +674,7 @@ export const FarmerDashboardPage: React.FC = () => {
 
         {activeTab === 'demand' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <BarChart3 size={16} className="text-purple-400" /> {language === 'hi' ? 'मांग अंतर्दृष्टि' : 'Demand Insights'}
-                <Badge variant="purple" size="sm">AI • matchBuyers()</Badge>
-              </h3>
-              <div className="flex items-center gap-2">
-                <select 
-                  value={forecastProduct} 
-                  onChange={(e) => setForecastProduct(e.target.value)}
-                  className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none text-slate-700"
-                >
-                  <option value="Wheat">Wheat</option>
-                  <option value="Tomato">Tomato</option>
-                  <option value="Potato">Potato</option>
-                  <option value="Onion">Onion</option>
-                </select>
-                <span className="text-[11px] text-slate-500 hidden sm:inline">Powered by existing aiService</span>
-              </div>
-            </div>
-
-            {/* Buyer Demand section */}
-            <Card className="p-5 bg-white border-slate-200">
-              <h4 className="text-xs font-black tracking-widest uppercase text-slate-500 mb-3">Buyer Demand for Your Produce</h4>
-              {buyerDemandForMyProduce.length === 0 ? (
-                <p className="text-sm text-slate-500">No demand matched yet — add more produce categories</p>
-              ) : (
-                <div className="space-y-3">
-                  {buyerDemandForMyProduce.slice(0, 5).map(({ produce, match }: any, idx: number) => (
-                    <div key={idx} className="flex gap-3 p-3 rounded-xl bg-white border border-slate-200">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${idx % 2 ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'}`}>
-                        <Users size={18} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-900 truncate">
-                          {match.buyer.name} <span className="font-normal text-slate-500">wants</span> {match.requirement.produceName}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2">
-                          <span className="flex items-center gap-1">
-                            <Package size={11} /> {match.requirement.quantityKg} kg
-                          </span>
-                          <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                            <IndianRupee size={11} /> {match.requirement.budgetPerKg}/kg
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MapPin size={11} /> {match.buyer.location}
-                          </span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${match.totalScore >= 85 ? 'bg-emerald-500 text-white border-emerald-400' : 'bg-amber-500 text-white border-amber-400'}`}>{match.totalScore}% match</span>
-                        </p>
-                        <p className="text-[11px] text-slate-500 mt-1 italic">"{match.explanation}"</p>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => navigate('/farmer/buyers')} className="hidden sm:inline-flex shrink-0 h-9">
-                        Connect
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            {/* Demand forecast – derived via aiService aggregation, not hardcoded */}
-            {demandForecast ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <Card className="p-5 bg-gradient-to-br from-purple-500/10 via-slate-50 to-slate-50 border-purple-500/20">
-                  <div className="flex justify-between items-start mb-4">
-                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <TrendingUp size={16} className="text-purple-600" /> AI Demand Forecast: {demandForecast.product}
-                    </h4>
-                    <Badge variant={demandForecast.trend === 'Increasing' ? 'emerald' : demandForecast.trend === 'Decreasing' ? 'amber' : 'slate'} size="sm">
-                      {demandForecast.trend} Trend
-                    </Badge>
-                  </div>
-                  
-                  <div className="mb-4">
-                    <p className="text-3xl font-black text-slate-900">{demandForecast.predictedDemandKg.toLocaleString()} <span className="text-sm text-slate-500 font-normal">kg expected</span></p>
-                    <p className="text-xs text-slate-500 mt-1">Forecast period: {demandForecast.forecastPeriod}</p>
-                  </div>
-                  
-                  <div className="bg-white p-3 rounded-xl border border-slate-200">
-                    <p className="text-xs font-bold text-slate-700 mb-2">Recommendation</p>
-                    <p className="text-sm text-slate-600">{demandForecast.recommendation}</p>
-                  </div>
-                </Card>
-                <Card className="p-5 bg-white border-slate-200">
-                  <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2 mb-4">
-                    <BarChart3 size={14} className="text-teal-600" /> Projected Demand ({demandForecast.forecastPeriod})
-                  </h4>
-                  <div className="flex h-32 items-end gap-2 mt-4">
-                    {demandForecast.chartData.map((d, i) => {
-                      const max = Math.max(...demandForecast.chartData.map(c => c.demand));
-                      const heightPct = Math.max(10, Math.round((d.demand / max) * 100));
-                      return (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                          <div className="w-full bg-slate-100 rounded-t-md relative flex items-end justify-center h-full overflow-hidden">
-                            <div 
-                              className="w-full bg-purple-500 rounded-t-md transition-all duration-500" 
-                              style={{ height: `${heightPct}%` }}
-                            />
-                          </div>
-                          <span className="text-[10px] text-slate-500">{d.week}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Card>
-              </div>
-            ) : (
-               <Card className="p-8 text-center flex items-center justify-center">
-                 <Loader2 size={24} className="animate-spin text-purple-600" />
-               </Card>
-            )}
-
-            <Card className="p-4 bg-white/60 border-slate-200">
-              <p className="text-[11px] text-slate-500">
-                Demand Insights are computed from <code className="px-1 py-0.5 rounded bg-white text-slate-600">matchBuyers()</code> in <span className="text-slate-600">src/services/aiService.ts</span> — same engine used for voice intent. No fake hardcoded AI. Falls back to local parsing if <code className="px-1 py-0.5 rounded bg-white text-slate-600">/api/voice-intent</code> unavailable. Ready to extend with real backend forecast via <code className="px-1 py-0.5 rounded bg-white text-slate-600">/api/demand-forecast</code>.
-              </p>
-            </Card>
+            <DemandForecastingView initialCrop="Wheat" />
           </div>
         )}
       </div>

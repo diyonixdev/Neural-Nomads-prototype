@@ -1464,66 +1464,114 @@ const apiHandler = withRequestTimeout(async (request, response) => {
     }
   }
 
-  // GET /api/forecast — demand forecasting
-  if (method === 'GET' && pathname === '/api/forecast') {
+  // GET /api/forecast and /api/demand-forecast — enhanced demand forecasting
+  if (method === 'GET' && (pathname === '/api/forecast' || pathname === '/api/demand-forecast')) {
     const productQ = urlObj.searchParams.get('product') || 'Wheat';
+    const timeframe = urlObj.searchParams.get('timeframe') || '30d';
+    const region = urlObj.searchParams.get('region') || 'ncr';
     const product = productQ.toLowerCase();
     
     // Read historical orders
     const orders = loadStoredOrders();
     
     // Filter orders for the specific product
-    let productOrders = orders.filter(o => o.allocations && o.allocations.some(a => a.listing.name.toLowerCase().includes(product) || a.listing.category.toLowerCase().includes(product)));
+    let productOrders = orders.filter(o => o.allocations && o.allocations.some(a => (a.listing.name && a.listing.name.toLowerCase().includes(product)) || (a.listing.category && a.listing.category.toLowerCase().includes(product))));
     
-    // Fallback to mock requirements if very few orders exist
+    // Base demand calculation
     let baseDemand = 0;
     if (productOrders.length < 3) {
       const allDemands = serverMockBuyerRequirements;
-      const productDemands = allDemands.filter(r => r.produceName.toLowerCase().includes(product));
-      baseDemand = productDemands.reduce((sum, r) => sum + r.quantityKg, 0) || 500;
+      const productDemands = allDemands.filter(r => r.produceName && r.produceName.toLowerCase().includes(product));
+      baseDemand = productDemands.reduce((sum, r) => sum + r.quantityKg, 0) || 50000;
     } else {
       baseDemand = productOrders.reduce((sum, o) => {
-        return sum + o.allocations.filter(a => a.listing.name.toLowerCase().includes(product) || a.listing.category.toLowerCase().includes(product)).reduce((s, a) => s + a.allocatedKg, 0);
-      }, 0) / productOrders.length * 4; // average weekly demand * 4 to get monthly
+        return sum + o.allocations.filter(a => (a.listing.name && a.listing.name.toLowerCase().includes(product)) || (a.listing.category && a.listing.category.toLowerCase().includes(product))).reduce((s, a) => s + a.allocatedKg, 0);
+      }, 0) / productOrders.length * 4;
     }
-    
-    // Generate trend based on simple threshold logic
-    const trends = ['Increasing', 'Stable', 'Decreasing'];
-    let trend = trends[1];
-    let recommendation = 'Maintain current production/stock.';
-    
-    // Example statistical heuristic
-    if (baseDemand > 2000) {
-      trend = 'Increasing';
-      recommendation = 'Consider increasing availability. High market demand detected.';
-    } else if (baseDemand < 1000 && baseDemand > 0) {
-      trend = 'Decreasing';
-      recommendation = 'Avoid excessive stock. Demand is lower than usual.';
-    }
-    
-    // Generate a simple chart data for next 4 weeks
-    const chartData = [
-      { week: 'Week 1', demand: Math.round(baseDemand * 0.8) },
-      { week: 'Week 2', demand: Math.round(baseDemand * 0.9) },
-      { week: 'Week 3', demand: Math.round(baseDemand * 1.1) },
-      { week: 'Week 4', demand: Math.round(baseDemand * 1.25) },
+
+    // Default crop baseline profiles
+    const cropBaselines = {
+      wheat: { basePrice: 24.8, msp: 22.75, trend: 'Increasing', trendPct: 9.4, arrivals: baseDemand * 0.78, status: 'Supply Deficit — High Buyer Demand' },
+      tomato: { basePrice: 32.5, msp: 16.0, trend: 'Increasing', trendPct: 21.5, arrivals: baseDemand * 0.69, status: 'Acute Shortage in Wholesale Hubs' },
+      potato: { basePrice: 21.0, msp: 12.5, trend: 'Stable', trendPct: 3.2, arrivals: baseDemand * 0.95, status: 'Balanced Supply-Demand' },
+      onion: { basePrice: 28.5, msp: 18.0, trend: 'Decreasing', trendPct: -7.8, arrivals: baseDemand * 1.15, status: 'Surplus Inflow — Prices Cooling' },
+      rice: { basePrice: 42.0, msp: 23.0, trend: 'Increasing', trendPct: 12.6, arrivals: baseDemand * 0.74, status: 'Strong Export & Processing Demand' },
+      cauliflower: { basePrice: 26.0, msp: 14.0, trend: 'Increasing', trendPct: 15.2, arrivals: baseDemand * 0.76, status: 'High Restaurant & Wedding Season Demand' },
+      cabbage: { basePrice: 18.0, msp: 10.0, trend: 'Stable', trendPct: 2.5, arrivals: baseDemand * 0.97, status: 'Steady Demand with Moderate Supply' },
+      carrot: { basePrice: 34.0, msp: 15.0, trend: 'Increasing', trendPct: 14.8, arrivals: baseDemand * 0.75, status: 'High Demand for Juice and Halwa' },
+      peas: { basePrice: 48.0, msp: 20.0, trend: 'Increasing', trendPct: 24.5, arrivals: baseDemand * 0.67, status: 'Early Season Scarcity — Peak Premium' },
+      mustard: { basePrice: 58.5, msp: 56.5, trend: 'Increasing', trendPct: 8.2, arrivals: baseDemand * 0.84, status: 'Firm Crushing Demand from Oil Mills' },
+      garlic: { basePrice: 148.0, msp: 60.0, trend: 'Increasing', trendPct: 26.8, arrivals: baseDemand * 0.66, status: 'Severe National Deficit' },
+      mango: { basePrice: 65.0, msp: 35.0, trend: 'Stable', trendPct: 1.2, arrivals: baseDemand * 0.94, status: 'Late Season Premium Varietal Demand' },
+    };
+
+    const matchedKey = Object.keys(cropBaselines).find(k => product.includes(k)) || 'wheat';
+    const profile = cropBaselines[matchedKey];
+    const trend = profile.trend;
+    const basePrice = profile.basePrice;
+
+    // Build timeline charts
+    const periods = timeframe === '7d' 
+      ? ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7']
+      : timeframe === '90d'
+      ? ['Month 1 (Oct)', 'Month 2 (Nov)', 'Month 3 (Dec)']
+      : ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+
+    const chartData = periods.map((period, idx) => {
+      const mult = 1 + (idx * (profile.trendPct / 100)) * (timeframe === '7d' ? 0.2 : 0.5);
+      const demand = Math.round((baseDemand / periods.length) * mult);
+      const arrivals = Math.round(demand * (trend === 'Decreasing' ? 1.15 : trend === 'Increasing' ? 0.75 : 0.95));
+      const price = Math.round(basePrice * (1 + (idx * profile.trendPct / 250)) * 10) / 10;
+      return {
+        week: period,
+        period,
+        periodLabel: period,
+        demand,
+        demandKg: demand,
+        arrivals,
+        arrivalKg: arrivals,
+        price,
+        projectedPrice: price,
+        priceMin: Math.round(price * 0.92 * 10) / 10,
+        priceMax: Math.round(price * 1.10 * 10) / 10,
+        msp: profile.msp,
+        deficitKg: demand - arrivals,
+      };
+    });
+
+    const totalPredictedDemandKg = chartData.reduce((s, c) => s + c.demandKg, 0);
+    const totalArrivalsKg = chartData.reduce((s, c) => s + c.arrivalKg, 0);
+
+    const mandis = [
+      { name: 'Azadpur Mandi', location: 'Delhi', distanceKm: 42, modalPrice: Math.round((basePrice * 1.08) * 10) / 10, transportCostPerKg: 1.2, netReturnPerKg: Math.round((basePrice * 1.08 - 1.2) * 10) / 10, dailyArrivalTonnes: 850, isBest: true },
+      { name: 'Sahibabad Mandi', location: 'Ghaziabad, UP', distanceKm: 16, modalPrice: Math.round((basePrice * 1.02) * 10) / 10, transportCostPerKg: 0.5, netReturnPerKg: Math.round((basePrice * 1.02 - 0.5) * 10) / 10, dailyArrivalTonnes: 340, isBest: false },
+      { name: 'Meerut Mandi', location: 'Meerut, UP', distanceKm: 54, modalPrice: Math.round((basePrice * 0.96) * 10) / 10, transportCostPerKg: 0.9, netReturnPerKg: Math.round((basePrice * 0.96 - 0.9) * 10) / 10, dailyArrivalTonnes: 280, isBest: false },
     ];
-    
-    if (trend === 'Decreasing') {
-      chartData[2].demand = Math.round(baseDemand * 0.85);
-      chartData[3].demand = Math.round(baseDemand * 0.7);
-    } else if (trend === 'Stable') {
-      chartData[2].demand = Math.round(baseDemand * 0.95);
-      chartData[3].demand = Math.round(baseDemand * 1.05);
-    }
-    
+
     sendJson(response, 200, {
       product: productQ,
-      predictedDemandKg: Math.round(baseDemand * 1.1),
-      forecastPeriod: 'Next Month',
+      timeframe,
+      region,
+      predictedDemandKg: totalPredictedDemandKg,
+      expectedArrivalsKg: totalArrivalsKg,
+      marketDeficitSurplusKg: totalPredictedDemandKg - totalArrivalsKg,
+      forecastPeriod: timeframe === '7d' ? 'Next 7 Days' : timeframe === '90d' ? 'Next 90 Days' : 'Next 30 Days',
       trend,
-      recommendation,
-      chartData
+      trendPct: profile.trendPct,
+      currentModalPrice: basePrice,
+      mspPrice: profile.msp,
+      projectedPriceAvg: Math.round((chartData.reduce((s, c) => s + c.price, 0) / chartData.length) * 10) / 10,
+      projectedPriceMin: Math.min(...chartData.map(c => c.priceMin)),
+      projectedPriceMax: Math.max(...chartData.map(c => c.priceMax)),
+      confidencePct: 92,
+      statusText: profile.status,
+      recommendation: trend === 'Increasing' 
+        ? `High market demand detected (+${profile.trendPct}%). Consider staggering harvest or utilizing cold chain to capture peak prices.`
+        : trend === 'Decreasing'
+        ? `Supply surplus detected (${profile.trendPct}%). Avoid excessive holding; grade produce and sell directly to buyers.`
+        : `Stable market demand. Maintain steady dispatch schedule.`,
+      chartData,
+      mandis,
     }, request);
     return;
   }

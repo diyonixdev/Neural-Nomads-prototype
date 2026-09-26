@@ -41,7 +41,28 @@ export const Topbar: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-xl border-b border-slate-200 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      {/* Official Government e-KYC / Login Quick Bar */}
+      <div className="bg-slate-900 text-slate-100 text-[11px] py-1.5 px-3 sm:px-6 flex items-center justify-between border-b border-slate-800">
+        <div className="flex items-center gap-2 truncate">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-300 font-bold text-[10px] border border-amber-500/40">
+            🏛️ GOV e-KYC
+          </span>
+          <span className="text-slate-300 truncate text-[11px]">
+            {language === 'hi'
+              ? 'डिजिटल किसान पोर्टल: आधार / डिजिलॉकर डेमो लॉगिन एवं सत्यापन'
+              : 'Digital India Kisan Portal: Aadhaar / DigiLocker Demo Login'}
+          </span>
+        </div>
+        <button
+          onClick={() => navigate('/login')}
+          className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] transition-all shadow-sm hover:scale-105 cursor-pointer ml-2"
+        >
+          <ShieldCheck size={13} />
+          <span>{language === 'hi' ? 'लॉगिन पेज →' : 'Open Login Page →'}</span>
+        </button>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand Logo & Title */}
         <div
           onClick={() => {
@@ -124,26 +145,27 @@ export const Topbar: React.FC = () => {
             <span>{language === 'en' ? 'हिंदी' : 'EN'}</span>
           </button>
 
-          {/* Profile / Login button - desktop */}
-          <div className="hidden sm:flex items-center gap-2">
+          {/* Profile / Login button - ALWAYS visible on mobile & desktop */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {isAuthenticated && user ? (
               <button
                 onClick={() => navigate('/login')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition-colors shadow-sm"
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition-colors shadow-sm"
                 title="Go to Kisan Portal Dashboard"
               >
-                <ShieldCheck size={15} className="text-emerald-600" />
-                <span className="max-w-[120px] truncate">{user.name}</span>
+                <ShieldCheck size={15} className="text-emerald-600 shrink-0" />
+                <span className="max-w-[75px] sm:max-w-[120px] truncate">{user.name}</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               </button>
             ) : (
               <button
                 onClick={() => navigate('/login')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20"
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/20"
                 title="Sign In / Digital e-KYC"
               >
-                <ShieldCheck size={14} className="text-emerald-200" />
-                <span>{language === 'hi' ? 'लॉग इन / पहचान' : 'Login / e-KYC'}</span>
+                <ShieldCheck size={14} className="text-emerald-200 shrink-0" />
+                <span className="font-bold">{language === 'hi' ? 'लॉग इन' : 'Login'}</span>
+                <span className="hidden md:inline font-normal text-emerald-100">{language === 'hi' ? ' / पहचान' : ' / e-KYC'}</span>
               </button>
             )}
           </div>
@@ -174,6 +196,32 @@ export const Topbar: React.FC = () => {
       {mobileOpen && (
         <div className="lg:hidden border-t border-slate-200 bg-white/95 backdrop-blur-xl">
           <div className="px-4 py-4 space-y-3">
+            {/* Direct Official Kisan Portal CTA in Mobile Drawer */}
+            <div
+              onClick={() => {
+                navigate('/login');
+                setMobileOpen(false);
+              }}
+              className="p-3 rounded-2xl bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 border border-emerald-600/40 text-white cursor-pointer shadow-lg shadow-emerald-950/20 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold">
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <p className="text-xs font-black text-emerald-300">
+                    {language === 'hi' ? '🏛️ किसान ई-केवाईसी पोर्टल' : '🏛️ Kisan Portal & e-KYC'}
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    {isAuthenticated && user ? `Logged in as ${user.name}` : 'Aadhaar / DigiLocker Demo Login'}
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-400 bg-emerald-950/80 px-2 py-1 rounded-lg border border-emerald-700">
+                {isAuthenticated ? 'Open →' : 'Login →'}
+              </span>
+            </div>
+
             <nav className="grid grid-cols-2 gap-2">
               {navItems.map((item) => (
                 <NavLink

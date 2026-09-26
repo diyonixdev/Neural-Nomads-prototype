@@ -19,7 +19,8 @@ import {
   Wallet,
   BarChart3,
   ClipboardList,
-  Leaf
+  Leaf,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -28,7 +29,8 @@ export const Sidebar: React.FC = () => {
 
   const consumerNav = [
     { to: '/consumer', icon: LayoutDashboard, label: 'Overview', labelHi: 'डैशबोर्ड' },
-    { to: '/consumer/voice', icon: Mic, label: 'Voice Assistant', labelHi: 'वॉयस सहायक', highlight: true },
+    { to: '/login', icon: ShieldCheck, label: 'Kisan Portal & e-KYC', labelHi: 'किसान पोर्टल (लॉगिन)', highlight: true },
+    { to: '/consumer/voice', icon: Mic, label: 'Voice Assistant', labelHi: 'वॉयस सहायक' },
     { to: '/consumer/matches', icon: Users, label: 'Farmer Matches', labelHi: 'किसान मिलान' },
     { to: '/consumer/call', icon: PhoneCall, label: 'Direct Call', labelHi: 'सीधी बातचीत' },
     { to: '/consumer/order', icon: FileText, label: 'Order Summary', labelHi: 'ऑर्डर सारांश' },
@@ -41,8 +43,9 @@ export const Sidebar: React.FC = () => {
   // Seller: clearly separate experience — 7 items as requested, amber/teal identity
   const farmerNav = [
     { to: '/farmer', icon: LayoutDashboard, label: 'Dashboard', labelHi: 'डैशबोर्ड', end: true },
+    { to: '/login', icon: ShieldCheck, label: 'Kisan Portal & e-KYC', labelHi: 'किसान पोर्टल (लॉगिन)', highlight: true },
     { to: '/farmer?tab=my-produce', icon: Leaf, label: 'My Produce', labelHi: 'मेरी उपज' },
-    { to: '/farmer?tab=add-produce', icon: Plus, label: 'Add Produce', labelHi: 'उपज जोड़ें', highlight: true },
+    { to: '/farmer?tab=add-produce', icon: Plus, label: 'Add Produce', labelHi: 'उपज जोड़ें' },
     { to: '/farmer?tab=inventory', icon: Package, label: 'Inventory', labelHi: 'इन्वेंटरी' },
     { to: '/farmer/buyers', icon: Users, label: 'Buyer Requests', labelHi: 'खरीदार अनुरोध' },
     { to: '/farmer/order', icon: ClipboardList, label: 'Orders', labelHi: 'ऑर्डर' },

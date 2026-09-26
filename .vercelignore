@@ -1,0 +1,11 @@
+node_modules
+dist
+.opencode
+*.test.mjs
+test-*.mjs
+test-*.txt
+test_flow.js
+debug-*.mjs
+analyze-duplicates.py
+audit-*.md
+VOICE_FIX.md

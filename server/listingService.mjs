@@ -1,6 +1,7 @@
 import { db } from './firebase.mjs';
 import { Timestamp } from 'firebase-admin/firestore';
 
+console.log('[DEBUG] listingService.mjs: db import resolved, db is', db === null ? 'NULL' : typeof db);
 const COLLECTION_NAME = 'listings';
 
 const VALID_UNITS = ['kg', 'tonnes', 'quintal'];

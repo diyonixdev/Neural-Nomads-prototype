@@ -9,7 +9,10 @@
     "dev:ai": "node server/aiIntentApi.mjs",
     "dev:all": "node server/runBoth.mjs",
     "build": "tsc && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 3000"
+"preview": "vite preview --host 0.0.0.0 --port 3000",
+    "start": "node server/aiIntentApi.mjs",
+    "test:logistics": "node --test server/logisticsService.test.mjs",
+    "test:logistics:e2e": "node test-logistics-e2e.mjs"
   },
   "dependencies": {
     "firebase": "^12.19.0",

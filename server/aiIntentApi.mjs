@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createListing, getListingById } from './listingService.mjs';
+import { db } from './firebase.mjs';
 import { processTurn, getSession, deleteSession, STATES } from './conversationManager.mjs';
+import { handleIncomingCall, handleSpeechResult } from './twilioVoice.mjs';
 
 // --- Simple .env loader (no extra dependency) ---
 const __dirnameEnv = path.dirname(fileURLToPath(import.meta.url));
@@ -639,7 +641,15 @@ const apiHandler = withRequestTimeout(async (request, response) => {
 
   // ===== HEALTH (GET /health and GET /api/health) =====
   if (method === 'GET' && (pathname === '/health' || pathname === '/api/health')) {
-    sendJson(response, 200, { status: 'ok', service: 'FarmDirect API', port: PORT, hasApiKey: !!API_KEY, model: MODEL, time: new Date().toISOString() }, request);
+    sendJson(response, 200, {
+      status: db ? 'ok' : 'degraded',
+      service: 'FarmDirect API',
+      port: PORT,
+      firestore: db ? 'connected' : 'not initialized',
+      hasApiKey: !!API_KEY,
+      model: MODEL,
+      time: new Date().toISOString(),
+    }, request);
     return;
   }
 
@@ -1759,7 +1769,7 @@ const apiHandler = withRequestTimeout(async (request, response) => {
     return;
   }
 
-  if (pathname === '/api/auth/config' && method === 'GET') {
+if (pathname === '/api/auth/config' && method === 'GET') {
     let config = null;
     if (process.env.FIREBASE_CONFIG) {
       try {
@@ -1784,7 +1794,39 @@ const apiHandler = withRequestTimeout(async (request, response) => {
     return;
   }
 
+  // ===== TWILIO INCOMING CALL =====
+  if (method === 'POST' && pathname === '/api/twilio/incoming') {
+    console.log('[TWILIO] Incoming call webhook received');
+    // Delegate to twilioVoice adapter
+    await handleIncomingCall(request, response);
+    return;
+  }
+
+  // ===== TWILIO SPEECH RESULT =====
+  if (method === 'POST' && pathname === '/api/twilio/handle') {
+    console.log('[TWILIO] Speech result webhook received');
+    await handleSpeechResult(request, response);
+    return;
+  }
+
   sendJson(response, 404, { error: 'Not found' }, request);
+}));
+
+server.listen(PORT, () => {
+  console.log(`AI intent API listening on http://localhost:${PORT}`);
+  console.log(`  POST /api/listings        (create listing in Firestore)`);
+  console.log(`  GET  /api/listings/:id    (retrieve listing by ID from Firestore)`);
+  console.log(`  POST /api/extract-listing   (transcript -> structured listing data)`);
+  console.log(`  POST /api/conversation/turn (multi-turn conversation management)`);
+  console.log(`  GET/DELETE /api/conversation/:session_id (get/delete conversation session)`);
+  console.log(`  POST /api/voice-assistant (unified, stateful, 9 intents)`);
+  console.log(`  POST /api/voice-intent, /api/assistant-response (legacy, with fallback)`);
+  console.log(`  GET  /health, /api/health  (health check)`);
+  console.log(`  GET  /docs                (Swagger/OpenAPI documentation)`);
+  console.log(`  GET/POST /api/produce, /api/produce/:id, PUT/DELETE /api/produce/:id`);
+  console.log(`  GET /api/buyer-requirements, POST /api/marketplace/search`);
+  console.log(`Firestore: ${db ? 'connected' : 'NOT initialized - writes will fail'}`);
+  console.log(`Allowed origin: ${process.env.AI_ALLOWED_ORIGIN ?? '(auto: any localhost)'}  -> try http://localhost:5173`);
 });
 
 const server = http.createServer(apiHandler);

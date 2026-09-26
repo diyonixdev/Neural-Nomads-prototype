@@ -162,18 +162,225 @@ const numberToHindiWords = (n: number, language: string = 'hinglish'): string =>
   const tensDev = ['', '', 'बीस', 'तीस', 'चालीस', 'पचास', 'साठ', 'सत्तर', 'अस्सी', 'नब्बे'];
   const tensHing = ['', '', 'bees', 'tees', 'chalis', 'pachaas', 'saath', 'sattar', 'assi', 'nabbe'];
 
+  const compoundDev: string[] = [
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    'इक्कीस',
+    'बाईस',
+    'तेईस',
+    'चौबीस',
+    'पच्चीस',
+    'छब्बीस',
+    'सत्ताईस',
+    'अट्ठाईस',
+    'उनतीस',
+    'तीस',
+    'इकतीस',
+    'बत्तीस',
+    'तैंतीस',
+    'चौंतीस',
+    'पैंतीस',
+    'छत्तीस',
+    'सैंतीस',
+    'अड़तीस',
+    'उनतालीस',
+    'चालीस',
+    'इकतालीस',
+    'बयालीस',
+    'तैंतालीस',
+    'चौंतालीस',
+    'पैंतालीस',
+    'छियालीस',
+    'सैंतालीस',
+    'अड़तालीस',
+    'उनचास',
+    'पचास',
+    'इक्यावन',
+    'बावन',
+    'तिरपन',
+    'चौंपन',
+    'पचपन',
+    'छप्पन',
+    'सत्तावन',
+    'अट्ठावन',
+    'उनसठ',
+    'साठ',
+    'इकसठ',
+    'बासठ',
+    'तिरसठ',
+    'चौंसठ',
+    'पैंसठ',
+    'छियासठ',
+    'सड़सठ',
+    'अड़सठ',
+    'उनहत्तर',
+    'सत्तर',
+    'इकहत्तर',
+    'बहत्तर',
+    'तिहत्तर',
+    'चौंहत्तर',
+    'पचहत्तर',
+    'छिहत्तर',
+    'सतहत्तर',
+    'अठहत्तर',
+    'उन्नासी',
+    'अस्सी',
+    'इक्यासी',
+    'बयासी',
+    'तिरासी',
+    'चौंसी',
+    'पचासी',
+    'छियासी',
+    'सतासी',
+    'अठासी',
+    'उन्नवे',
+    'नब्बे',
+    'इक्यानवे',
+    'बानवे',
+    'तिरानवे',
+    'चौंनवे',
+    'पचानवे',
+    'छियानवे',
+    'सतानवे',
+    'अठानवे',
+    'निन्यानवे'
+  ];
+  const compoundHing: string[] = [
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    'ikkis',
+    'bais',
+    'teis',
+    'chaubis',
+    'pachis',
+    'chabbis',
+    'satais',
+    'athais',
+    'unatees',
+    'tees',
+    'iktis',
+    'baitis',
+    'taentis',
+    'chauntis',
+    'paintis',
+    'chhattis',
+    'saintis',
+    'adtis',
+    'untalis',
+    'chalis',
+    'iktalis',
+    'byalis',
+    'taentalis',
+    'chauntalis',
+    'paintalis',
+    'chhiyalis',
+    'saintalis',
+    'adtalis',
+    'unchas',
+    'pachaas',
+    'ikkyaavan',
+    'baavan',
+    'tirpan',
+    'chaunpan',
+    'chappan',
+    'chhihappan',
+    'sattavan',
+    'athhavan',
+    'unsath',
+    'saath',
+    'ikksath',
+    'baasath',
+    'tirsath',
+    'chaunsath',
+    'paintsath',
+    'chhiyasath',
+    'sadsath',
+    'athsath',
+    'unnhattar',
+    'sattar',
+    'ikkhattar',
+    'bahattar',
+    'tihattar',
+    'chaunhattar',
+    'pachhattar',
+    'chhihattar',
+    'satahattar',
+    'athhattar',
+    'unnaasi',
+    'assi',
+    'ikkyasi',
+    'byasi',
+    'tirasi',
+    'chaunsi',
+    'pachasi',
+    'chhiyasi',
+    'satasi',
+    'athasi',
+    'unanve',
+    'nabbe',
+    'ikkyaanve',
+    'baanve',
+    'tiraanve',
+    'chaunve',
+    'pachaanve',
+    'chhiyaanve',
+    'sataanve',
+    'athaanve',
+    'ninyanve'
+  ];
+
   const hundredsDev = ['', 'एक सौ', 'दो सौ', 'तीन सौ', 'चार सौ', 'पाँच सौ', 'छह सौ', 'सात सौ', 'आठ सौ', 'नौ सौ'];
   const hundredsHing = ['', 'ek sau', 'do sau', 'teen sau', 'chaar sau', 'paanch sau', 'chhe sau', 'saat sau', 'aath sau', 'nau sau'];
 
   const ones = isDev ? onesDev : onesHing;
   const tens = isDev ? tensDev : tensHing;
   const hundreds = isDev ? hundredsDev : hundredsHing;
+  const compound = isDev ? compoundDev : compoundHing;
 
   if (n < 20) return ones[n];
   if (n < 100) {
     const t = Math.floor(n / 10);
     const o = n % 10;
-    return tens[t] + (o ? ' ' + ones[o] : '');
+    if (o === 0) return tens[t];
+    return compound[n] || tens[t] + ' ' + ones[o];
   }
   if (n < 1000) {
     const h = Math.floor(n / 100);
@@ -371,14 +578,19 @@ const getMissingRequiredFields = (listing: ListingData): string[] =>
     (f) => (listing as Record<string, unknown>)[f] === null || (listing as Record<string, unknown>)[f] === undefined
   );
 
+const getAllMissingFields = (listing: ListingData): string[] => {
+  const allFields = [...REQUIRED_FIELDS, 'quality'] as const;
+  return (allFields as readonly string[]).filter(
+    (f) => (listing as Record<string, unknown>)[f] === null || (listing as Record<string, unknown>)[f] === undefined
+  );
+};
+
 const isComplete = (listing: ListingData) => getMissingRequiredFields(listing).length === 0;
 
 const getPriorityNextField = (missing: string[]): string => {
-  // Ask name before phone: farmers naturally give their name before their
-  // number, so a name-only answer must never be dropped mid-flow.
-  // Quality comes after price (matches the example flow) but never blocks
-  // confirmation - it is asked once and skipped if unanswered.
-  const order = ['product', 'quantity', 'asking_price', 'quality', 'location', 'farmer_name', 'phone'];
+  // Strict conversation order: PRODUCT → NAME → QUANTITY → LOCATION → QUALITY → PRICE → CONFIRMATION
+  // Phone is asked last, after price
+  const order = ['product', 'farmer_name', 'quantity', 'unit', 'location', 'quality', 'asking_price', 'price_unit', 'phone', 'intent'];
   for (const f of order) {
     if (missing.includes(f)) return f;
   }
@@ -390,12 +602,12 @@ const generateQuestion = (field: string, language: string, listing?: ListingData
   if (isHiLang(language)) {
     const questions: Record<string, string> = {
       product: 'Aap kya bechna chahte hain?',
-      quantity: 'Kitna bechna hai?',
-      asking_price: 'Aap kitne rupaye mein bechna chahenge?',
-      quality: product ? `${product} ki quality kaisi hai?` : 'Quality kaisi hai?',
-      location: 'Aap kahan se hain?',
+      quantity: product ? `Aap kitna ${product} bechna chahte hain?` : 'Kitna bechna hai?',
+      asking_price: 'Aap kya price rakhna chahte hain ji?',
+      quality: 'Aapke maal ki quality kya hai ji? Grade A, B ya C?',
+      location: 'Aap kahan se hain ji?',
       phone: 'Aapka mobile number kya hai?',
-      farmer_name: 'Aapka naam kya hai?',
+      farmer_name: 'Aapka naam kya hai ji?',
       unit: 'Kya unit hai — kilo, tonne, litre, piece?',
       price_unit: 'Yeh kimat per kya hai?',
       intent: 'Bechna hai kya?',
@@ -404,9 +616,9 @@ const generateQuestion = (field: string, language: string, listing?: ListingData
   }
   const questions: Record<string, string> = {
     product: 'What do you want to sell?',
-    quantity: 'How much do you want to sell?',
-    asking_price: 'How much is the price?',
-    quality: product ? `What is the quality of the ${product}?` : 'How is the quality?',
+    quantity: product ? `How much ${product} do you want to sell?` : 'How much do you want to sell?',
+    asking_price: 'What price do you want to set?',
+    quality: 'What is the quality of your product? Grade A, B, or C?',
     location: 'Where are you from?',
     phone: 'What is your mobile number?',
     farmer_name: 'What is your name?',
@@ -417,29 +629,40 @@ const generateQuestion = (field: string, language: string, listing?: ListingData
   return questions[field] || 'Please tell me a bit more.';
 };
 
-const generateConfirmation = (listing: ListingData, _language: string): string => {
+const generateConfirmation = (listing: ListingData, _language: string, session: ConversationSession): string => {
   // Single-stage final summary per spec — ONE complete dynamic listing.
   // Every value comes from the collected listing; nothing is hardcoded.
-  const name = listing.farmer_name ?? '-';
-  const phone = listing.phone ?? '-';
-  const product = listing.product ?? '-';
-  const qty = listing.quantity ?? '-';
-  const unit = listing.unit ?? '-';
-  const price = listing.asking_price ?? '-';
-  const priceUnit = listing.price_unit ?? '-';
-  const place = listing.location ?? '-';
-  const quality = listing.quality ?? '-';
-  return (
-    `Yeh aapki listing ki details hain:\n` +
-    `Naam: ${name}\n` +
-    `Phone: ${phone}\n` +
-    `Product: ${product}\n` +
-    `Quantity: ${qty} ${unit}\n` +
-    `Price: ₹${price}/${priceUnit}\n` +
-    `Location: ${place}\n` +
-    `Quality: ${quality}\n\n` +
-    `Sab theek hai?`
-  );
+  // Show only fields that actually have data; no fabricated defaults.
+  const lines: string[] = [];
+  lines.push('Yeh aapki listing ki details hain:');
+  if (listing.farmer_name) {
+    lines.push(`Naam: ${listing.farmer_name}`);
+  }
+  if (listing.phone) {
+    lines.push(`Phone: ${listing.phone}`);
+  }
+  if (listing.product) {
+    lines.push(`Product: ${listing.product}`);
+  }
+  if (listing.quantity !== null && listing.quantity !== undefined) {
+    const unit = listing.unit || 'kg';
+    lines.push(`Quantity: ${listing.quantity} ${unit}`);
+  }
+  if (listing.asking_price !== null && listing.asking_price !== undefined) {
+    const priceUnit = listing.price_unit || 'kg';
+    lines.push(`Price: ₹${listing.asking_price}/${priceUnit}`);
+  }
+  if (listing.location) {
+    lines.push(`Location: ${listing.location}`);
+  }
+  if (listing.quality) {
+    lines.push(`Quality: ${listing.quality}`);
+  } else if (session.quality_asked) {
+    lines.push(`Quality: -`);
+  }
+  lines.push('');
+  lines.push('Sab theek hai?');
+  return lines.join('\n');
 };
 
 const isUnusableTurn = (extracted: Partial<ListingData>) => !hasExtractedData(extracted);
@@ -555,7 +778,8 @@ const buildAskMessage = (
   extracted: Partial<ListingData>,
   prevListing: ListingData,
   nextField: string,
-  language: string
+  language: string,
+  text: string = ''
 ): string => {
   // Defensive: NEVER re-ask for a field already captured, including name/phone.
   // If nextField is already filled in listing, find the next truly missing field.
@@ -567,14 +791,21 @@ const buildAskMessage = (
     const order = ['product', 'quantity', 'asking_price', 'quality', 'location', 'farmer_name', 'phone'];
     for (const f of order) {
       if (missing.includes(f)) {
-        return buildAskMessage(listing, extracted, prevListing, f, language);
+        return buildAskMessage(listing, extracted, prevListing, f, language, text);
       }
     }
-    return buildAskMessage(listing, extracted, prevListing, missing[0], language);
+    return buildAskMessage(listing, extracted, prevListing, missing[0], language, text);
   }
   // Unclear answer to the previous question: gently re-ask, don't skip ahead.
   // But if the answer is unusable and we already have phone/name, don't loop on them.
   if (extracted && isUnusableTurn(extracted)) {
+    // Greeting mid-conversation: respond naturally instead of "Maaf kijiye"
+    const trimmedLower = text.trim().toLowerCase().replace(/[.,!?]/g, '');
+    const isGreeting = /^(namaste|namaskar|hello|hi|hii|hey|नमस्ते|नमस्कार)/i.test(trimmedLower)
+      || /^(namaste\s*ji|namaskar\s*ji|hello\s*ji|hi\s*ji)$/i.test(trimmedLower);
+    if (isGreeting) {
+      return 'Namaste ji, FarmDirect se bol raha hoon. Kya bechna chahte hain?';
+    }
     return isHiLang(language)
       ? `Maaf kijiye, samajh nahi aaya. ${generateQuestion(nextField, language, listing)}`
       : `Sorry, I didn't catch that. ${generateQuestion(nextField, language, listing)}`;
@@ -672,9 +903,8 @@ const applyBareNumberAndCorrections = (
         return;
       }
     }
-    if (!hasQtyWord && !hasPriceWord) {
-      return;
-    }
+    // Phone-like number must never become price or quantity.
+    return;
   }
 
   if (extracted.quantity == null && hasQtyWord && standalone != null && !hasPriceWord) {
@@ -708,6 +938,16 @@ const applyBareNumberAndCorrections = (
     } else if (asked === 'asking_price' || hasPriceWord) {
       extracted.asking_price = standalone;
       extracted.price_unit = extracted.price_unit || 'kg';
+    } else if (asked == null) {
+      // Bare number with no field hint during correction flow — default to
+      // asking_price (most common change) unless last_echo_field hints quantity.
+      if (session.last_echo_field === 'quantity') {
+        extracted.quantity = standalone;
+        extracted.unit = extracted.unit || session.listing.unit || 'kg';
+      } else {
+        extracted.asking_price = standalone;
+        extracted.price_unit = extracted.price_unit || 'kg';
+      }
     }
   }
 
@@ -748,8 +988,14 @@ const parseQualityAnswer = (text: string): string | null => {
     /\b(bata|nahi|pata|malum|kuch|dekh|baad|aap|tum|khud|batado|batao)\b/.test(lower) ||
     isNoiseAnswer(text);
   if (isDodge) return null;
-  if (trimmed.length >= 2 && trimmed.length <= 30 && !/\d/.test(trimmed)) {
-    return titleCase(trimmed);
+  // Only accept actual grade values (A/B/C) or recognized quality descriptors.
+  // Never accept arbitrary names/locations as quality.
+  const gradeOnly = /^[A-C]\.?$|^Grade\s+[ABC]\.?$|^A$|^B$|^C$/i.test(trimmed);
+  if (gradeOnly) {
+    const normalized = trimmed.toUpperCase().replace('.', '');
+    if (normalized === 'A' || normalized === 'GRADEA') return 'Grade A';
+    if (normalized === 'B' || normalized === 'GRADEB') return 'Grade B';
+    if (normalized === 'C' || normalized === 'GRADEC') return 'Grade C';
   }
   return null;
 };
@@ -823,6 +1069,12 @@ const applySlotFallbacks = (
     if (q) extracted.quality = q;
   }
   if (nextField === 'location' && !extracted.location) {
+    // Prefer existing location detector; only assign when it finds a real place.
+    const detected = detectLocation(text);
+    if (detected) {
+      extracted.location = titleCase(detected);
+      return;
+    }
     const trimmed = text.trim().replace(/[.,!?;:'"()]/g, '');
     const lowerCheck = trimmed.toLowerCase();
     // Never treat greetings as location — prevents "Namaste" → "Namaste note kar liya" / "Namaste se"
@@ -852,10 +1104,7 @@ const applySlotFallbacks = (
 // overwrite the real farmer name. Cumulative state is preserved by mergeListing
 // (nulls never overwrite), so clearing the misplaced name is safe.
 const repairConfirmationFieldSwap = (text: string, extracted: Partial<ListingData>): void => {
-  if (detectChangeField(text) === 'location' && extracted.location == null && extracted.farmer_name != null) {
-    extracted.location = extracted.farmer_name;
-    extracted.farmer_name = null;
-  }
+  // Disabled: must never swap name and location; every field must come from farmer input only.
 };
 
 const extractTurnData = (text: string, session: ConversationSession): Partial<ListingData> => {
@@ -866,7 +1115,7 @@ const extractTurnData = (text: string, session: ConversationSession): Partial<Li
     price_unit: null as string | null,
     quality: parseGrade(text),
     intent: parseIntent(text),
-    location: detectLocation(text),
+    location: session.last_asked === 'farmer_name' ? null : detectLocation(text),
     farmer_name: null,
     phone: null,
   };
@@ -904,7 +1153,7 @@ const extractTurnData = (text: string, session: ConversationSession): Partial<Li
     if (extracted.product && extracted.product.toLowerCase() === nameFromText.toLowerCase()) {
       (extracted as any).product = '';
     }
-  } else if (extracted.location && !extracted.farmer_name) {
+  
     // detectLocation may have classified a bare word as a location. If the
     // system wasn't asking for location and the text has no grammar context
     // ("se", "mein"), the word is ambiguous — treat as name instead.
@@ -973,6 +1222,7 @@ const respond = (
     listing_id: session.listing_id,
     error,
   };
+
 };
 
 const processTurn = async (sessionId: string, text: string): Promise<ConversationTurnResult> => {
@@ -1014,8 +1264,10 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
   if (prevState === 'IDLE' && !session.greeted) {
     session.greeted = true;
     const trimmedLower = text.trim().toLowerCase().replace(/[.,!?]/g, '');
-    if (trimmedLower === 'namaste' || trimmedLower === 'namaste ji' || trimmedLower === 'namaskar' || trimmedLower === 'namaskar ji' || trimmedLower === 'namasteji') {
-      const msg = 'Namaste ji, aap kya bechna chahte hain?';
+    const isGreeting = /^(namaste|namaskar|hello|hi|hii|hey|नमस्ते|नमस्कार)/i.test(trimmedLower)
+      || /^(namaste\s*ji|namaskar\s*ji|hello\s*ji|hi\s*ji)$/i.test(trimmedLower);
+    if (isGreeting) {
+      const msg = 'Namaste ji, FarmDirect se bol raha hoon. Kya bechna chahte hain?';
       session.state = 'LISTENING';
       session.last_asked = 'product';
       pushTurn(session, 'agent', msg);
@@ -1023,7 +1275,7 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
     }
     const firstExtracted = extractTurnData(text, session);
     if (isUnusableTurn(firstExtracted)) {
-      const msg = 'Namaste ji, aap kya bechna chahte hain?';
+      const msg = 'Namaste ji, FarmDirect se bol raha hoon. Kya bechna chahte hain?';
       session.state = 'LISTENING';
       session.last_asked = 'product';
       pushTurn(session, 'agent', msg);
@@ -1116,7 +1368,7 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
           session.confirmation_stage = null;
           session.last_asked = null;
           session.last_echo_field = null;
-          const msg = generateConfirmation(session.listing, language);
+          const msg = generateConfirmation(session.listing, language, session);
           pushTurn(session, 'agent', msg);
           return respond(session, 'CONFIRMING', msg, []);
         }
@@ -1124,7 +1376,7 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
         session.last_asked = nextField;
         session.last_echo_field = lastEchoField(extracted);
         session.state = 'ASKING';
-        const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language);
+        const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language, text);
         pushTurn(session, 'agent', msg);
         return respond(session, 'ASKING', msg, missing, nextField);
       }
@@ -1171,7 +1423,7 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
           session.confirmation_stage = null;
           session.last_asked = null;
           session.last_echo_field = null;
-          const msg = generateConfirmation(session.listing, language);
+          const msg = generateConfirmation(session.listing, language, session);
           pushTurn(session, 'agent', msg);
           return respond(session, 'CONFIRMING', msg, []);
         }
@@ -1179,7 +1431,7 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
         session.last_asked = nextField;
         session.last_echo_field = lastEchoField(extracted);
         session.state = 'ASKING';
-        const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language);
+        const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language, text);
         pushTurn(session, 'agent', msg);
         return respond(session, 'ASKING', msg, missing, nextField);
       }
@@ -1199,8 +1451,33 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
 
   session.state = 'PROCESSING';
 
+  // Greeting mid-conversation: respond naturally before extracting data
+  const trimmedLower = text.trim().toLowerCase().replace(/[.,!?]/g, '');
+  const isGreeting = /^(namaste|namaskar|hello|hi|hii|hey|नमस्ते|नमस्कार)/i.test(trimmedLower)
+    || /^(namaste\s*ji|namaskar\s*ji|hello\s*ji|hi\s*ji)$/i.test(trimmedLower);
+  if (isGreeting) {
+    const nextField = getPriorityNextField(getMissingRequiredFields(session.listing));
+    session.last_asked = nextField;
+    session.state = 'ASKING';
+    const msg = 'Namaste ji, FarmDirect se bol raha hoon. Kya bechna chahte hain?';
+    pushTurn(session, 'agent', msg);
+    return respond(session, 'ASKING', msg, getMissingRequiredFields(session.listing), nextField);
+  }
+
   const prevListing = { ...session.listing };
   const extracted = extractTurnData(text, session);
+  console.log('[TRACE] EXTRACTED DATA:', JSON.stringify({
+    farmer_name: extracted.farmer_name ?? null,
+    phone: extracted.phone ?? null,
+    product: extracted.product ?? null,
+    quantity: extracted.quantity ?? null,
+    unit: extracted.unit ?? null,
+    asking_price: extracted.asking_price ?? null,
+    price_unit: extracted.price_unit ?? null,
+    location: extracted.location ?? null,
+    quality: extracted.quality ?? null,
+    intent: extracted.intent ?? null,
+  }));
 
   // Farmer is steering to a different field (e.g. says "price" while we
   // asked for the phone number) - honor that switch instead of re-asking.
@@ -1218,34 +1495,27 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
   }
 
   session.listing = mergeListing(session.listing, extracted);
+  console.log('[TRACE] SESSION AFTER TURN:', JSON.stringify({
+    farmer_name: session.listing.farmer_name ?? null,
+    phone: session.listing.phone ?? null,
+    product: session.listing.product ?? null,
+    quantity: session.listing.quantity ?? null,
+    unit: session.listing.unit ?? null,
+    asking_price: session.listing.asking_price ?? null,
+    price_unit: session.listing.price_unit ?? null,
+    location: session.listing.location ?? null,
+    quality: session.listing.quality ?? null,
+    intent: session.listing.intent ?? null,
+  }));
 
-  const missing = getMissingRequiredFields(session.listing);
-
-  // Quality is part of the listing schema but optional in the API. Ask it
-  // once, right after product/quantity/price are known (matches the example
-  // flow: "Wheat ki quality kaisi hai?") - it never blocks confirmation.
-  // Only ask if the user hasn't provided ALL fields (name/phone still missing).
-  const qualityPending = !session.listing.quality && !session.quality_asked;
-  const coreMissing = missing.filter((f) => f !== 'location' && f !== 'farmer_name' && f !== 'phone');
-  const namePhoneMissing = missing.filter((f) => f === 'location' || f === 'farmer_name' || f === 'phone');
-
-  if (qualityPending && coreMissing.length === 0 && namePhoneMissing.length > 0) {
-    session.quality_asked = true;
-    session.state = 'ASKING';
-    session.last_asked = 'quality';
-    session.last_echo_field = lastEchoField(extracted);
-    const echo = generateEcho(session.listing, extracted, prevListing, language);
-    const question = generateQuestion('quality', language, session.listing);
-    const msg = echo ? `${echo} ${question}` : question;
-    pushTurn(session, 'agent', msg);
-    return respond(session, 'ASKING', msg, missing, 'quality');
-  }
+  const missing = getAllMissingFields(session.listing);
+  // Quality is now part of the regular conversation flow: PRODUCT → NAME → QUANTITY → LOCATION → QUALITY → PRICE → CONFIRMATION
 
   if (missing.length === 0) {
     session.state = 'CONFIRMING';
     session.last_asked = null;
     session.last_echo_field = null;
-    const msg = generateConfirmation(session.listing, language);
+    const msg = generateConfirmation(session.listing, language, session);
     pushTurn(session, 'agent', msg);
     return respond(session, 'CONFIRMING', msg, []);
   }
@@ -1265,7 +1535,7 @@ const processTurn = async (sessionId: string, text: string): Promise<Conversatio
   const nextField = getPriorityNextField(missing);
   session.last_asked = nextField;
   session.last_echo_field = lastEchoField(extracted);
-  const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language);
+  const msg = buildAskMessage(session.listing, extracted, prevListing, nextField, language, text);
 
   session.state = 'ASKING';
   pushTurn(session, 'agent', msg);

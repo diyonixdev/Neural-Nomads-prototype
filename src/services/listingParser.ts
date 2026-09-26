@@ -195,6 +195,12 @@ const isBareProductUtterance = (text: string): boolean => {
 
 const parseQuantity = (text: string): { quantity: number | null; unit: string | null } => {
   const norm = text.toLowerCase().replace(/\s+/g, ' ');
+  // If the text clearly indicates a price (price word near the number), do NOT extract quantity from that number.
+  // Prevents "30 rupaye kilo" from being read as quantity=30.
+  const lowerText = text.toLowerCase();
+  if (/(?:\d+(?:\.\d+)?)\s*(?:rupaye|rupaiya).*?(?:kg|kilo)|(?:kg|kilo).*?(?:rupaye|rupaiya)/i.test(lowerText) || /(?:₹|rs\.?|inr).*\d+/i.test(lowerText)) {
+    return { quantity: null, unit: null };
+  }
   const m =
     norm.match(/(\d+(?:\.\d+)?)\s*(kg|kilo|kilos|kilogram|kilograms|किलो|किलोग्राम)(?:\s|,|\.|$)/) ||
     norm.match(/(\d+(?:\.\d+)?)\s*(ton|tons|tonne|tonnes|टन)(?:\s|,|\.|$)/) ||
@@ -290,6 +296,7 @@ const detectLocation = (text: string): string | null => {
   const HEAD = new Set(['location', 'jagah', 'place', 'gaon', 'village', 'shehar', 'city', 'town', 'nagar', 'sthan']);
   const CONJ = new Set(['aur', 'and', 'lekin', 'but', 'ya', 'or']);
   const TIME = new Set(['kal', 'aaj', 'parso', 'subah', 'shaam', 'raat', 'din', 'tak']);
+  const CORRECTION = new Set(['no', 'nope', 'nahi', 'nahin', 'actually', 'wait', 'change', 'modify', 'edit', 'update', 'correct', 'wrong', 'galat', 'cancel', 'stop']);
   // Units and price words are never place names ("10 kilo mein ..." must not
   // yield location "Kilo"). Closed vocabulary, not a city list.
   const NOT_PLACE = new Set([
@@ -328,7 +335,42 @@ const detectLocation = (text: string): string | null => {
     const cand = words.join(' ');
     if (cand.split(/\s+/).some(ww => PRODUCT_WORDS.has(ww.toLowerCase()))) return null;
     return looksLikeCleanValue(cand, 3) ? titleCase(cand) : null;
-  };  for (let i = 0; i < tokens.length; i++) {
+  };
+
+  // ── Correction pre-scan ──────────────────────────────────────────────
+  // "X nahi Y" / "X actually Y" / "X galat Y" → extract location from the
+  // corrected part (Y), not the negated part (X).  Works for both comma
+  // separated ("Ghaziabad nahi, Hapur") and bare ("Ghaziabad nahi Hapur")
+  // correction patterns.
+  {
+    const correctionIdx = tokens.findIndex((t) => CORRECTION.has(t));
+    if (correctionIdx >= 0) {
+      const afterCorrection = tokens.slice(correctionIdx + 1);
+      for (let i = 0; i < afterCorrection.length; i++) {
+        const w = afterCorrection[i];
+        if (!PREP.has(w) && !HEAD.has(w) && !SWALLOWED.has(w) && !BE.has(w) && !NOT_PLACE.has(w) &&
+            i + 1 < afterCorrection.length && PREP.has(afterCorrection[i + 1])) {
+          const cand = cleanCandidate(i, i);
+          if (cand) return cand;
+        }
+        if ((w === 'from' || w === 'in' || w === 'at' || w === 'near' || w === 'mein' || HEAD.has(w)) && i + 1 < afterCorrection.length) {
+          const cand = cleanCandidate(i + 1, i + 1);
+          if (cand) return cand;
+        }
+      }
+      // Bare word after correction: "Ghaziabad nahi Hapur" / "nahi Hapur"
+      if (afterCorrection.length >= 1 && afterCorrection.length <= 3) {
+        const cand = afterCorrection.join(' ');
+        if (afterCorrection.every((t) => !/^\d/.test(t) && !NOT_PLACE.has(t) && !PRODUCT_WORDS.has(t) &&
+          !GLUE_WORDS.has(t) && !BE.has(t) && !PREP.has(t) && !SWALLOWED.has(t) && !HEAD.has(t))) {
+          const resolved = looksLikeCleanValue(cand, 3) ? titleCase(cand) : null;
+          if (resolved) return resolved;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
     const w = tokens[i];
     // Pattern: <PLACE> <PREP> — "ghaziabad se", "meerut se", "pune mein" (even mid-sentence)
     if (!PREP.has(w) && !HEAD.has(w) && !SWALLOWED.has(w) && !BE.has(w) && !NOT_PLACE.has(w) &&
@@ -357,7 +399,6 @@ const detectLocation = (text: string): string | null => {
   // "Priya, 9876543210, Meerut" must not become a location.
   // Leading correction words ("Actually Noida") are stripped; pure
   // corrections ("No", "change") reduce to nothing.
-  const CORRECTION = new Set(['no', 'nope', 'nahi', 'nahin', 'actually', 'wait', 'change', 'modify', 'edit', 'update', 'correct', 'wrong', 'galat', 'cancel', 'stop']);
   const detectedName = extractNameFromText(text);
   const nameWords = detectedName ? new Set(detectedName.toLowerCase().split(/\s+/)) : new Set();
   const segments = text.split(/[,;]/).map((x) => x.trim()).filter(Boolean);
@@ -373,6 +414,9 @@ const detectLocation = (text: string): string | null => {
     let segTokens = seg.toLowerCase().replace(/[.,!?;:'"()]/g, ' ').split(/\s+/).filter(Boolean);
     while (segTokens.length && CORRECTION.has(segTokens[0])) segTokens = segTokens.slice(1);
     while (segTokens.length > 1 && PREP.has(segTokens[segTokens.length - 1])) segTokens = segTokens.slice(0, -1);
+    // Skip segments containing correction words — they are being negated.
+    // E.g. "Ghaziabad nahi" in "Ghaziabad nahi, Hapur" must be discarded.
+    if (segTokens.some((t) => CORRECTION.has(t))) continue;
     if (segTokens.length < 1 || segTokens.length > 2) continue;
     const joined = segTokens.join(' ');
     if (segTokens.some((t) => /^\d/.test(t) || NOT_PLACE.has(t) || GLUE_WORDS.has(t) || BE.has(t) || PREP.has(t) || SWALLOWED.has(t) || HEAD.has(t))) continue;

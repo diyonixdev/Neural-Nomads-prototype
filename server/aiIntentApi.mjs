@@ -629,7 +629,7 @@ const markListing = (data) => {
   recentListings.set(hash, Date.now());
 };
 
-const server = http.createServer(withRequestTimeout(async (request, response) => {
+const apiHandler = withRequestTimeout(async (request, response) => {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {}, request);
     return;
@@ -1769,6 +1769,31 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
     return;
   }
 
+if (pathname === '/api/auth/config' && method === 'GET') {
+    let config = null;
+    if (process.env.FIREBASE_CONFIG) {
+      try {
+        config = typeof process.env.FIREBASE_CONFIG === 'string'
+          ? JSON.parse(process.env.FIREBASE_CONFIG)
+          : process.env.FIREBASE_CONFIG;
+      } catch (err) {
+        console.warn('[auth] Could not parse FIREBASE_CONFIG env var:', err.message);
+      }
+    }
+    sendJson(response, 200, {
+      configured: !!config,
+      config: config ? {
+        apiKey: config.apiKey,
+        authDomain: config.authDomain,
+        projectId: config.projectId,
+        storageBucket: config.storageBucket,
+        messagingSenderId: config.messagingSenderId,
+        appId: config.appId,
+      } : null,
+    }, request);
+    return;
+  }
+
   // ===== TWILIO INCOMING CALL =====
   if (method === 'POST' && pathname === '/api/twilio/incoming') {
     console.log('[TWILIO] Incoming call webhook received');
@@ -1804,9 +1829,36 @@ server.listen(PORT, () => {
   console.log(`Allowed origin: ${process.env.AI_ALLOWED_ORIGIN ?? '(auto: any localhost)'}  -> try http://localhost:5173`);
 });
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} in use. Change AI_INTENT_PORT in .env or kill process.`);
-    process.exit(1);
-  }
-});
+const server = http.createServer(apiHandler);
+
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('aiIntentApi.mjs') ||
+  process.argv[1].endsWith('runBoth.mjs')
+);
+
+if (isMainModule) {
+  server.listen(PORT, () => {
+    console.log(`AI intent API listening on http://localhost:${PORT}`);
+    console.log(`  POST /api/listings        (create listing in Firestore)`);
+    console.log(`  GET  /api/listings/:id    (retrieve listing by ID from Firestore)`);
+    console.log(`  POST /api/extract-listing   (transcript -> structured listing data)`);
+    console.log(`  POST /api/conversation/turn (multi-turn conversation management)`);
+    console.log(`  GET/DELETE /api/conversation/:session_id (get/delete conversation session)`);
+    console.log(`  POST /api/voice-assistant (unified, stateful, 9 intents)`);
+    console.log(`  POST /api/voice-intent, /api/assistant-response (legacy, with fallback)`);
+    console.log(`  GET  /health, /api/health  (health check)`);
+    console.log(`  GET  /docs                (Swagger/OpenAPI documentation)`);
+    console.log(`  GET/POST /api/produce, /api/produce/:id, PUT/DELETE /api/produce/:id`);
+    console.log(`  GET /api/buyer-requirements, POST /api/marketplace/search`);
+    console.log(`Allowed origin: ${process.env.AI_ALLOWED_ORIGIN ?? '(auto: any localhost)'}  -> try http://localhost:5173`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} in use. Change AI_INTENT_PORT in .env or kill process.`);
+      process.exit(1);
+    }
+  });
+}
+
+export { apiHandler, server };

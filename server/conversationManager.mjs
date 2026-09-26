@@ -1,6 +1,7 @@
 import { extractListingFallback, looksLikeCleanValue, extractNameFromText as extractNameFromTextImported } from './extractListingParser.mjs';
+import { createListing } from './listingService.mjs';
 
-const LISTINGS_API_URL = process.env.LISTINGS_API_URL || 'http://localhost:8787/api/listings';
+const LISTINGS_API_URL = process.env.LISTINGS_API_URL || 'http://localhost:3000/api/listings';
 
 const submitListing = async (listing) => {
   const payload = {
@@ -56,11 +57,20 @@ const submitListing = async (listing) => {
       message: data?.error || 'Something went wrong. Please try again.',
     };
   } catch (err) {
-    return {
-      success: false,
-      error: 'network',
-      message: err?.message || 'Could not reach listing service.',
-    };
+    try {
+      const doc = await createListing(payload);
+      return {
+        success: true,
+        listing_id: doc.listing_id,
+        status: doc.status || 'created',
+      };
+    } catch (innerErr) {
+      return {
+        success: false,
+        error: 'network',
+        message: innerErr?.message || err?.message || 'Could not reach listing service.',
+      };
+    }
   }
 };
 

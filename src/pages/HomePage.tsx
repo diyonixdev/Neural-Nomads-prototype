@@ -409,6 +409,47 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
 
+          {/* Spotlight: Official Government Kisan Portal & Digital e-KYC Banner */}
+          <div className="mt-8 rounded-3xl bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white p-5 sm:p-6 border border-emerald-500/30 shadow-xl relative overflow-hidden">
+            <div className="absolute -top-12 -right-12 w-48 h-48 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5 relative z-10">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-slate-950 flex items-center justify-center shrink-0 font-black shadow-lg shadow-emerald-500/30">
+                  <ShieldCheck size={26} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {language === 'hi' ? '🏛️ भारत सरकार ई-केवाईसी' : '🏛️ Digital India e-KYC'}
+                    </span>
+                    <span className="text-[11px] text-emerald-400 font-bold">
+                      DigiLocker • Aadhaar Demo • Mobile OTP
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-white mt-1">
+                    {language === 'hi'
+                      ? 'सत्यापित किसान पोर्टल एवं डिजिटल पहचान'
+                      : 'Verified Kisan Portal & Digital Identity Setup'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">
+                    {language === 'hi'
+                      ? 'अपनी पहचान सत्यापित करें, भूमि अभिलेख लिंक करें और शून्य प्रतिशत आढ़ती कमीशन पर सीधे खरीदारों से जुड़ें।'
+                      : 'Access the government-enabled farmer portal. Authenticate with Aadhaar demo, DigiLocker land records, or Mobile OTP to list verified produce lots directly.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0 w-full md:w-auto">
+                <button
+                  onClick={() => navigate('/login')}
+                  className="w-full md:w-auto px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm transition-all shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2 cursor-pointer hover:scale-105"
+                >
+                  <ShieldCheck size={16} />
+                  <span>{language === 'hi' ? 'लॉगिन / ई-केवाईसी खोलें →' : 'Access Login Portal & e-KYC →'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Concept: immediate communication */}
           <div className="mt-10 sm:mt-12 rounded-3xl bg-white border border-slate-200 p-5 sm:p-6 relative overflow-hidden">
             <div className="absolute -top-10 -right-10 w-40 h-40 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />

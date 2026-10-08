@@ -6,4 +6,4 @@ dist/
 !.env.example
 .aider*
 .vercel
-.env*
+secrets/

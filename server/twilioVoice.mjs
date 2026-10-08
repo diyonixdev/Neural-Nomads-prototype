@@ -6,7 +6,34 @@ import { processTurn, createSession, getSession, deleteSession, STATES, EMPTY_LI
 // only by the conversation manager itself (submitListing inside processTurn);
 // the adapter never writes a listing to Firestore.
 
-const HANDLE_ACTION = 'https://disown-retying-absentee.ngrok-free.dev/api/twilio/handle';
+const HANDLE_PATH = '/api/twilio/handle';
+
+// Absolute callback URL for every continuing <Gather>. The public host changes
+// with every tunnel and deployment, so it is never hardcoded. Resolved per call
+// (never cached) so Vercel environment variables and the local .env loader
+// behave identically, the same way delhiveryService.getConfig() does:
+//   1. PUBLIC_BASE_URL, when set, wins - the escape hatch for a proxy whose
+//      forwarded headers do not reflect the host Twilio actually dialled.
+//   2. Otherwise derive it from the host Twilio itself used to reach us, which
+//      needs no configuration at all for ngrok/cloudflared/Vercel.
+//   3. Last resort, a relative path: Twilio resolves it against the request URL.
+const resolveHandleAction = (request) => {
+  const base = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (base) return `${base}${HANDLE_PATH}`;
+  const headers = request?.headers ?? {};
+  const forwardedHost = headers['x-forwarded-host'];
+  const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) || headers.host;
+  if (host) {
+    const hostname = String(host).split(',')[0].trim();
+    const forwardedProto = headers['x-forwarded-proto'];
+    // Default to https: a tunnel or Vercel always terminates TLS for us. Only a
+    // local request is plain http, so that it stays curl-able by hand.
+    const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)
+      || (/^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(hostname) ? 'http' : 'https');
+    return `${proto}://${hostname}${HANDLE_PATH}`;
+  }
+  return HANDLE_PATH;
+};
 
 const callSidToSessionId = new Map();
 const callSidProcessing = new Map(); // adapter-only turn guard
@@ -39,13 +66,14 @@ const escapeXml = (value) => String(value ?? '')
 // --- Centralised TwiML builders -------------------------------------------------
 // Every continuing Gather goes through buildSayGather():
 //   - input="speech", language="hi-IN", explicit speechTimeout, timeout="8"
-//   - absolute /api/twilio/handle action URL
+//   - absolute /api/twilio/handle action URL (see resolveHandleAction)
 //   - actionOnEmptyResult="true" so a Gather timeout still POSTs an empty
 //     SpeechResult to /api/twilio/handle, where the adapter re-prompts instead
 //     of the call silently ending
 //   - a <Redirect> AFTER </Gather> so a continuing Gather is NEVER the last
 //     verb in <Response>
-const buildSayGather = (message, action = HANDLE_ACTION, method = 'POST') => {
+const buildSayGather = (message, request, method = 'POST') => {
+  const action = resolveHandleAction(request);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech" action="${action}" method="${method}" timeout="8" speechTimeout="5" speechModel="phone_call" language="hi-IN" enhanced="true" finishOnKey="#" actionOnEmptyResult="true">
@@ -76,13 +104,13 @@ const lastAgentQuestion = (sessionObj) => {
   return null;
 };
 
-const buildReprompt = (sessionId) => {
+const buildReprompt = (sessionId, request) => {
   const sessionObj = getSession(sessionId);
   const prompt = lastAgentQuestion(sessionObj)
     || (sessionObj?.listing?.product
       ? 'Achha ji. Aapka naam kya hai ji?'
       : 'Namaste ji, FarmDirect se bol raha hoon. Aap kya bechna chahte hain ji?');
-  return buildSayGather(prompt);
+  return buildSayGather(prompt, request);
 };
 
 // --- Adapter-only listing preserve/restore ------------------------------------
@@ -181,14 +209,14 @@ export const handleIncomingCall = async (request, response) => {
     }
 
     // Play the greeting and then gather speech
-    const twiml = buildSayGather('Namaste ji, FarmDirect se bol raha hoon. Aap kya bechna chahte hain ji?');
+    const twiml = buildSayGather('Namaste ji, FarmDirect se bol raha hoon. Aap kya bechna chahte hain ji?', request);
 
     response.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
     response.end(twiml);
   } catch (err) {
     console.error('[TWILIO] Error in incoming call:', err);
     // Never silently drop the call: apologise, then keep a continuing Gather.
-    const twiml = buildSayGather('Kshama kijiye, kuch samasya aa gayi. Dhanyavaad.');
+    const twiml = buildSayGather('Kshama kijiye, kuch samasya aa gayi. Dhanyavaad.', request);
     if (!response.writableEnded) {
       response.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
       response.end(twiml);
@@ -231,7 +259,7 @@ export const handleSpeechResult = async (request, response) => {
     if (!speechResult || /^(Al|Be|K|The|Desk|I|See|Skill)\.?$/i.test(speechResult.trim())) {
       console.log('[TWILIO] Fragment/empty result re-prompt for', callSid);
       response.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-      response.end(buildReprompt(sessionId));
+      response.end(buildReprompt(sessionId, request));
       return;
     }
 
@@ -241,7 +269,7 @@ export const handleSpeechResult = async (request, response) => {
     if (callSidProcessing.get(callSid)) {
       console.log('[TWILIO] Overlapping Gather result ignored for', callSid);
       response.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-      response.end(buildReprompt(sessionId));
+      response.end(buildReprompt(sessionId, request));
       return;
     }
     callSidProcessing.set(callSid, true);
@@ -266,7 +294,7 @@ export const handleSpeechResult = async (request, response) => {
     console.log('[TWILIO] duplicateSkip:', duplicateSkip, { callSid, sessionId, speechResult });
     if (duplicateSkip) {
       response.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
-      response.end(buildReprompt(sessionId));
+      response.end(buildReprompt(sessionId, request));
       return;
     }
 
@@ -301,11 +329,11 @@ export const handleSpeechResult = async (request, response) => {
     switch (turnResult.state) {
       case STATES.ASKING:
         // Ask the next question
-        twiml = buildSayGather(turnResult.agent_message || 'Aap kya kehna chahte hain?');
+        twiml = buildSayGather(turnResult.agent_message || 'Aap kya kehna chahte hain?', request);
         break;
       case STATES.CONFIRMING:
         // Ask for confirmation
-        twiml = buildSayGather(turnResult.agent_message || 'Aap kya kehna chahte hain?');
+        twiml = buildSayGather(turnResult.agent_message || 'Aap kya kehna chahte hain?', request);
         break;
       case STATES.SUCCESS:
         // Terminal state. The manager itself created/submitted the listing —
@@ -327,12 +355,13 @@ export const handleSpeechResult = async (request, response) => {
         // Error state: apologize, then keep the call alive with a retry Gather
         // (never silently drop the call). Session is kept so the caller can retry.
         twiml = buildSayGather(
-          'Kshama kijiye, kuch samasya aa gayi. Kripya dobara koshish karein.'
+          'Kshama kijiye, kuch samasya aa gayi. Kripya dobara koshish karein.',
+          request
         );
         break;
       default:
         // Any other state (e.g. transition) — keep asking using existing manager message
-        twiml = buildSayGather(turnResult.agent_message || 'Aap kya kehna chahte hain?');
+        twiml = buildSayGather(turnResult.agent_message || 'Aap kya kehna chahte hain?', request);
         break;
     }
 
@@ -351,7 +380,7 @@ export const handleSpeechResult = async (request, response) => {
     // transient error. Do NOT delete the session; allow retry.
     try {
       if (!response.writableEnded) {
-        const retryTwiml = buildSayGather('Kshama kijiye, kuch samasya aa gayi. Kripya dobara koshish karein.');
+        const retryTwiml = buildSayGather('Kshama kijiye, kuch samasya aa gayi. Kripya dobara koshish karein.', request);
         response.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' });
         response.end(retryTwiml);
       }

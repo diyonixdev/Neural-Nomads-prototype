@@ -7,6 +7,7 @@ import {
   Users,
   FileText,
   MapPin,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
@@ -16,7 +17,7 @@ export const BottomNav: React.FC = () => {
     { to: '/consumer', icon: LayoutDashboard, label: 'Home', labelHi: 'होम' },
     { to: '/consumer/voice', icon: Mic, label: 'Voice', labelHi: 'वॉयस', special: true },
     { to: '/consumer/matches', icon: Users, label: 'Farmers', labelHi: 'किसान' },
-    { to: '/consumer/order', icon: FileText, label: 'Order', labelHi: 'ऑर्डर' },
+    { to: '/login', icon: ShieldCheck, label: 'e-KYC', labelHi: 'पोर्टल' },
     { to: '/consumer/tracking', icon: MapPin, label: 'Track', labelHi: 'ट्रैक' },
   ];
 
@@ -24,7 +25,7 @@ export const BottomNav: React.FC = () => {
     { to: '/farmer', icon: LayoutDashboard, label: 'Home', labelHi: 'होम' },
     { to: '/farmer/voice', icon: Mic, label: 'Voice', labelHi: 'वॉयस', special: true },
     { to: '/farmer/buyers', icon: Users, label: 'Buyers', labelHi: 'खरीदार' },
-    { to: '/farmer/connection', icon: Users, label: 'Connect', labelHi: 'संपर्क' },
+    { to: '/login', icon: ShieldCheck, label: 'e-KYC', labelHi: 'पोर्टल' },
     { to: '/farmer/order', icon: FileText, label: 'Order', labelHi: 'ऑर्डर' },
   ];
 

@@ -8,6 +8,7 @@ import { AddProduceForm } from '../../components/farmer/AddProduceForm';
 import { farmerInventoryService } from '../../services/farmerInventoryService';
 import { getProduceImage, getPricing, getAvailabilityStatus, FALLBACK_PRODUCE_IMAGE } from '../../services/productService';
 import { FarmerHelpPanel } from '../../components/farmer/FarmerHelpPanel';
+import { DemandForecastingView } from '../../components/farmer/DemandForecastingView';
 import { mockBuyerRequirements, mockBuyers, mockOrders } from '../../data/mockData';
 import { matchBuyers, fetchDemandForecast } from '../../services/aiService';
 import type { DemandForecastResult } from '../../services/aiService';
@@ -794,6 +795,7 @@ export const FarmerDashboardPage: React.FC = () => {
                 Demand Insights are computed from <code className="px-1 py-0.5 rounded bg-white text-slate-600">matchBuyers()</code> in <span className="text-slate-600">src/services/aiService.ts</span> — same engine used for voice intent. No fake hardcoded AI. Falls back to local parsing if <code className="px-1 py-0.5 rounded bg-white text-slate-600">/api/voice-intent</code> unavailable. Ready to extend with real backend forecast via <code className="px-1 py-0.5 rounded bg-white text-slate-600">/api/demand-forecast</code>.
               </p>
             </Card>
+            <DemandForecastingView initialCrop="Wheat" />
           </div>
         )}
       </div>

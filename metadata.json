@@ -1,0 +1,6 @@
+{
+  "name": "FarmDirect AI",
+  "description": "Bilingual agricultural marketplace with voice assistance connecting farmers and buyers with AI-driven matching and logistics.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

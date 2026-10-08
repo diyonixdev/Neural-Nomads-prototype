@@ -1,9 +1,11 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { DemoProvider } from './context/DemoContext';
+import { AuthProvider } from './context/AuthContext';
 import { Layout } from './components/Layout/Layout';
 
 import { HomePage } from './pages/HomePage';
+import { LoginPage } from './pages/auth/LoginPage';
 import { ConsumerDashboardPage } from './pages/consumer/ConsumerDashboardPage';
 import { ConsumerVoicePage } from './pages/consumer/ConsumerVoicePage';
 import { ConsumerMatchesPage } from './pages/consumer/ConsumerMatchesPage';
@@ -19,18 +21,24 @@ import { FarmerVoicePage } from './pages/farmer/FarmerVoicePage';
 import { FarmerBuyersPage } from './pages/farmer/FarmerBuyersPage';
 import { FarmerConnectionPage } from './pages/farmer/FarmerConnectionPage';
 import { FarmerOrderPage } from './pages/farmer/FarmerOrderPage';
+import { FarmerDemandPage } from './pages/farmer/FarmerDemandPage';
 import { ProductDetailsPage } from './pages/ProductDetailsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 export const App: React.FC = () => {
   return (
     <DemoProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<HomePage />} />
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<HomePage />} />
 
-            {/* Consumer Routes */}
+              {/* Authentication & Gov-Enabled Kisan Portal */}
+              <Route path="login" element={<LoginPage />} />
+              <Route path="auth" element={<LoginPage />} />
+
+              {/* Consumer Routes */}
             <Route path="consumer" element={<ConsumerDashboardPage />} />
             <Route path="consumer/voice" element={<ConsumerVoicePage />} />
             <Route path="consumer/matches" element={<ConsumerMatchesPage />} />
@@ -43,10 +51,14 @@ export const App: React.FC = () => {
 
             {/* Farmer Routes */}
             <Route path="farmer" element={<FarmerDashboardPage />} />
+            <Route path="farmer/demand" element={<FarmerDemandPage />} />
             <Route path="farmer/voice" element={<FarmerVoicePage />} />
             <Route path="farmer/buyers" element={<FarmerBuyersPage />} />
             <Route path="farmer/connection" element={<FarmerConnectionPage />} />
             <Route path="farmer/order" element={<FarmerOrderPage />} />
+
+            {/* Demand Forecasting & Market Intelligence */}
+            <Route path="demand-forecast" element={<FarmerDemandPage />} />
 
             {/* Buyer Marketplace — product details (isolated via productService) */}
             <Route path="product/:id" element={<ProductDetailsPage />} />
@@ -56,6 +68,7 @@ export const App: React.FC = () => {
           </Route>
         </Routes>
       </BrowserRouter>
+      </AuthProvider>
     </DemoProvider>
   );
 };

@@ -1,12 +1,17 @@
 import { processTurn, createSession, setSubmitListingImpl } from './server/conversationManager.mjs';
 import { sendConversationTurn } from './src/services/conversationManager.ts';
 
-// Mock submitListing so tests don't need a running HTTP server
-setSubmitListingImpl(async (listing) => ({
-  success: true,
-  listing_id: 'mock-listing-id-' + Date.now(),
-  status: 'active',
-}));
+// Mock submitListing so tests don't need a running HTTP server.
+// submitCount proves the listing is created EXACTLY once per confirmation.
+let submitCount = 0;
+setSubmitListingImpl(async (listing) => {
+  submitCount++;
+  return {
+    success: true,
+    listing_id: 'mock-listing-id-' + submitCount,
+    status: 'active',
+  };
+});
 
 let pass = 0;
 let fail = 0;
@@ -41,165 +46,160 @@ function assertNotIncludes(label, actual, unexpected) {
   }
 }
 
-// Helper: set up a complete listing ready for confirmation
+// Helper: set up a complete listing ready for confirmation.
+// Strict field order: product → name → location → quantity → quality → price → phone.
 async function setupCompleteListing(sessionId) {
   createSession(sessionId);
   await processTurn(sessionId, 'Namaste');
-  await processTurn(sessionId, 'Main Diya Raghav hoon, 2 kilo tamatar, 10 rupaye kilo, Ghaziabad se, 9876543210');
+  await processTurn(sessionId, 'tamatar');
+  await processTurn(sessionId, 'Diya Raghav');
+  await processTurn(sessionId, 'Ghaziabad');
+  await processTurn(sessionId, '2 kilo');
+  await processTurn(sessionId, 'Grade A');
+  await processTurn(sessionId, '10 rupaye kilo');
+  const r = await processTurn(sessionId, '9876543210');
+  if (r.state !== 'CONFIRMING') {
+    throw new Error('setup did not reach CONFIRMING: state=' + r.state + ' missing=' + JSON.stringify(r.missing_fields) + ' msg=' + r.agent_message);
+  }
+  submitCount = 0;
+  return r;
 }
 
 // ============================================================
-console.log('=== PATH 1: haan → Kuch badalna hai? → nahi → submit ===');
+console.log('=== PATH 1: haan → submit immediately (single-stage) ===');
 {
   const sid = 'test-path-1';
   await setupCompleteListing(sid);
 
-  // Turn: confirmation message should be shown
-  // Now farmer says "haan"
   const r1 = await processTurn(sid, 'haan');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
-  assert('Stage 1: still CONFIRMING', r1.state, 'CONFIRMING');
-  assert('Stage 1: listing preserved', r1.listing.farmer_name, 'Diya Raghav');
-
-  // Farmer says "nahi"
-  const r2 = await processTurn(sid, 'nahi');
-  assert('Stage 2: submits listing', r2.state, 'SUCCESS');
-  assert('Stage 2: listing_id present', r2.listing_id != null, true);
+  assert('Single-stage: first haan submits', r1.state, 'SUCCESS');
+  assert('Single-stage: listing_id present', r1.listing_id != null, true);
+  assert('Single-stage: created exactly once', submitCount, 1);
+  assertIncludes('Single-stage: success message', r1.agent_message, 'Aapki listing ho gayi. FarmDirect se dhanyawaad!');
+  assert('Single-stage: listing preserved', r1.listing.farmer_name, 'Diya Raghav');
+  assertNotIncludes('Single-stage: no second prompt', r1.agent_message, 'Kuch badalna hai');
 }
 
 // ============================================================
-console.log('\n=== PATH 2: haan → Kuch badalna hai? → haan → price → 15 ===');
+console.log('\n=== PATH 2: nahi → Kya badalna hai ji? → price → 15 → haan → submit ===');
 {
   const sid = 'test-path-2';
   await setupCompleteListing(sid);
 
-  // Farmer says "haan"
-  const r1 = await processTurn(sid, 'haan');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
+  const r1 = await processTurn(sid, 'nahi');
+  assert('Correction: asks what to change', r1.agent_message, 'Kya badalna hai ji?');
+  assert('Correction: still CONFIRMING', r1.state, 'CONFIRMING');
+  assert('Correction: not submitted yet', submitCount, 0);
 
-  // Farmer says "haan" (yes, I want to change something)
-  const r2 = await processTurn(sid, 'haan');
-  assert('Stage 2: asks which field', r2.state, 'CONFIRMING');
-  assertIncludes('Stage 2: asks what to change', r2.agent_message, 'badalna');
+  const r2 = await processTurn(sid, 'price');
+  assert('Correction: field selected', r2.state, 'CONFIRMING');
+  assertIncludes('Correction: asks new price', r2.agent_message, 'rupaye');
 
-  // Farmer says "price" — select field to change
-  const r3 = await processTurn(sid, 'price');
-  assert('Stage 3: asks new price', r3.state, 'CONFIRMING');
-  assertIncludes('Stage 3: asks for price', r3.agent_message, 'rupaye');
+  const r3 = await processTurn(sid, '15');
+  assert('After correction: re-confirms', r3.state, 'CONFIRMING');
+  assertIncludes('After correction: updated confirmation', r3.agent_message, 'pandrah rupaye');
+  assert('After correction: still not submitted', submitCount, 0);
 
-  // Farmer gives new price
-  const r4 = await processTurn(sid, '15');
-  // After correction, should re-confirm
-  assert('After correction: re-confirms', r4.state, 'CONFIRMING');
-  assertIncludes('After correction: shows updated confirmation', r4.agent_message, 'pandrah rupaye');
+  const r4 = await processTurn(sid, 'haan');
+  assert('Final haan: submits', r4.state, 'SUCCESS');
+  assert('Final haan: created exactly once', submitCount, 1);
+  assert('Final haan: new price stored', r4.listing.asking_price, 15);
 }
 
 // ============================================================
-console.log('\n=== PATH 3: theek hai → Kuch badalna hai? → nahi → submit ===');
+console.log('\n=== PATH 3: theek hai → submit immediately ===');
 {
   const sid = 'test-path-3';
   await setupCompleteListing(sid);
 
-  // Farmer says "theek hai"
   const r1 = await processTurn(sid, 'theek hai');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
-
-  // Farmer says "nahi"
-  const r2 = await processTurn(sid, 'nahi');
-  assert('Stage 2: submits listing', r2.state, 'SUCCESS');
+  assert('theek hai: submits', r1.state, 'SUCCESS');
+  assert('theek hai: created exactly once', submitCount, 1);
 }
 
 // ============================================================
-console.log('\n=== PATH 4: haan → Kuch badalna hai? → nahi sab theek hai → submit ===');
+console.log('\n=== PATH 4: nahi sab theek hai → submit (nothing to change) ===');
 {
   const sid = 'test-path-4';
   await setupCompleteListing(sid);
 
-  // Farmer says "haan"
-  const r1 = await processTurn(sid, 'haan');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
-
-  // Farmer says "nahi sab theek hai"
-  const r2 = await processTurn(sid, 'nahi sab theek hai');
-  assert('Stage 2: submits listing', r2.state, 'SUCCESS');
+  const r1 = await processTurn(sid, 'nahi sab theek hai');
+  assert('nahi sab theek hai: submits', r1.state, 'SUCCESS');
+  assert('nahi sab theek hai: created exactly once', submitCount, 1);
 }
 
 // ============================================================
-console.log('\n=== PATH 5: haan → Kuch badalna hai? → haan, price change → correction ===');
+console.log('\n=== PATH 5: haan, price change → correction → 25 → haan → submit ===');
 {
   const sid = 'test-path-5';
   await setupCompleteListing(sid);
 
-  // Farmer says "haan"
-  const r1 = await processTurn(sid, 'haan');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
+  const r1 = await processTurn(sid, 'haan, price change');
+  assert('Price change: enters correction flow', r1.state, 'CONFIRMING');
+  assertIncludes('Price change: asks new price', r1.agent_message, 'rupaye');
+  assert('Price change: not submitted yet', submitCount, 0);
 
-  // Farmer says "haan, price change" — wants to change price
-  const r2 = await processTurn(sid, 'haan, price change');
-  assert('Stage 2: enters correction flow', r2.state, 'ASKING');
+  const r2 = await processTurn(sid, '25');
+  assert('After correction: re-confirms', r2.state, 'CONFIRMING');
+  assertIncludes('After correction: updated price in confirmation', r2.agent_message, 'pachees rupaye');
 
-  // Farmer gives new price
-  const r3 = await processTurn(sid, '25');
-  assert('After correction: re-confirms', r3.state, 'CONFIRMING');
-  assertIncludes('After correction: updated price in confirmation', r3.agent_message, 'pachees rupaye');
+  const r3 = await processTurn(sid, 'haan');
+  assert('Final haan: submits', r3.state, 'SUCCESS');
+  assert('Final haan: created exactly once', submitCount, 1);
 }
 
 // ============================================================
-console.log('\n=== PATH 6: haan → Kuch badalna hai? → haan → haan → correction ===');
+console.log('\n=== PATH 6: nahi → quantity → 5 → haan → submit ===');
 {
   const sid = 'test-path-6';
   await setupCompleteListing(sid);
 
-  // Farmer says "haan"
-  const r1 = await processTurn(sid, 'haan');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
+  const r1 = await processTurn(sid, 'nahi');
+  assert('Quantity change: asks what to change', r1.agent_message, 'Kya badalna hai ji?');
 
-  // Farmer says "haan" (yes, want to change) but doesn't specify what
-  const r2 = await processTurn(sid, 'haan');
-  assert('Stage 2: asks which field', r2.state, 'CONFIRMING');
-  assertIncludes('Stage 2: asks what to change', r2.agent_message, 'badalna');
+  const r2 = await processTurn(sid, 'quantity');
+  assert('Quantity change: asks new quantity', r2.state, 'CONFIRMING');
+  assertIncludes('Quantity change: asks how much', r2.agent_message, 'bechna');
 
-  // Farmer says "quantity" — select field to change
-  const r3 = await processTurn(sid, 'quantity');
-  assert('Stage 3: asks new quantity', r3.state, 'CONFIRMING');
-  assertIncludes('Stage 3: asks for quantity', r3.agent_message, 'bechna');
+  const r3 = await processTurn(sid, '5');
+  assert('After correction: re-confirms', r3.state, 'CONFIRMING');
+  assertIncludes('After correction: updated quantity', r3.agent_message, 'paanch kilo');
 
-  // Farmer gives new quantity
-  const r4 = await processTurn(sid, '5');
-  assert('After correction: re-confirms', r4.state, 'CONFIRMING');
-  assertIncludes('After correction: updated quantity', r4.agent_message, 'paanch kilo');
+  const r4 = await processTurn(sid, 'haan');
+  assert('Final haan: submits', r4.state, 'SUCCESS');
+  assert('Final haan: created exactly once', submitCount, 1);
 }
 
 // ============================================================
-console.log('\n=== PATH 7: haan → Kuch badalna hai? → cancel → cancelled ===');
+console.log('\n=== PATH 7: cancel → cancelled (never submitted) ===');
 {
   const sid = 'test-path-7';
   await setupCompleteListing(sid);
 
-  // Farmer says "haan"
-  const r1 = await processTurn(sid, 'haan');
-  assert('Stage 1: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
-
-  // Farmer says "cancel"
-  const r2 = await processTurn(sid, 'cancel');
-  assert('Stage 2: cancels listing', r2.state, 'CANCELLED');
+  const r1 = await processTurn(sid, 'cancel');
+  assert('cancel: cancels listing', r1.state, 'CANCELLED');
+  assert('cancel: never submitted', submitCount, 0);
 }
 
 // ============================================================
-console.log('\n=== BARE NAHI AT STAGE 1 → ASKS Kuch badalna hai? ===');
+console.log('\n=== BARE NAHI → Kya badalna hai ji? → (nahi again → summary) → sab theek hai → submit ===');
 {
   const sid = 'test-bare-nahi';
   await setupCompleteListing(sid);
 
-  // Farmer says "nahi" directly (without first saying "haan")
   const r1 = await processTurn(sid, 'nahi');
-  // Should ask "Kuch badalna hai?" instead of submitting
-  assert('Bare nahi: asks Kuch badalna hai?', r1.agent_message, 'Kuch badalna hai?');
+  assert('Bare nahi: asks Kya badalna hai ji?', r1.agent_message, 'Kya badalna hai ji?');
   assert('Bare nahi: still CONFIRMING', r1.state, 'CONFIRMING');
+  assert('Bare nahi: not submitted', submitCount, 0);
 
-  // Now farmer says "nahi" again
   const r2 = await processTurn(sid, 'nahi');
-  assert('Second nahi: submits listing', r2.state, 'SUCCESS');
+  assert('Second nahi: back to summary', r2.state, 'CONFIRMING');
+  assertIncludes('Second nahi: summary shown', r2.agent_message, 'Sab sahi hai');
+  assert('Second nahi: still not submitted', submitCount, 0);
+
+  const r3 = await processTurn(sid, 'sab theek hai');
+  assert('sab theek hai: submits', r3.state, 'SUCCESS');
+  assert('sab theek hai: created exactly once', submitCount, 1);
 }
 
 // ============================================================
@@ -244,7 +244,8 @@ console.log('\n=== REGRESSION: product-question generation ===');
   await sendConversationTurn(sid1, 'Namaste');
   const r1 = await sendConversationTurn(sid1, 'Main aalu bechna chahta hoon');
   assertIncludes('1. Asks for quantity with product name', r1.agent_message.toLowerCase(), 'aalu');
-  assertIncludes('1. Asks how much', r1.agent_message, 'kitna');
+  // Strict order is product → name, so the next question is the name question.
+  assertIncludes('1. Asks for name next', r1.agent_message, 'naam kya hai');
   assert('1. Product is stored', r1.listing.product, 'Aalu');
 
   // 2. "Aalu" then "2 kilo" → quantity stored, product NOT re-asked

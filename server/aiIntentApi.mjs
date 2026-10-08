@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createListing, getListingById } from './listingService.mjs';
+import { createListing, getListingById, getAllListings } from './listingService.mjs';
 import { db } from './firebase.mjs';
 import { processTurn, getSession, deleteSession, STATES } from './conversationManager.mjs';
 import { handleIncomingCall, handleSpeechResult } from './twilioVoice.mjs';
@@ -702,6 +702,19 @@ const apiHandler = withRequestTimeout(async (request, response) => {
         console.error('[LISTINGS] Firestore error:', msg);
         sendJson(response, 500, { success: false, error: 'Failed to create listing' }, request);
       }
+    }
+    return;
+  }
+
+  // ===== LIST LISTINGS (read-only, for the Producer Dashboard bridge) =====
+  if (method === 'GET' && pathname === '/api/listings') {
+    console.log('[LISTINGS] GET /api/listings');
+    try {
+      const listings = await getAllListings();
+      sendJson(response, 200, { success: true, count: listings.length, listings }, request);
+    } catch (err) {
+      console.error('[LISTINGS] Firestore list error:', err.message || err);
+      sendJson(response, 500, { success: false, error: 'Failed to list listings' }, request);
     }
     return;
   }
@@ -1858,23 +1871,6 @@ if (pathname === '/api/auth/config' && method === 'GET') {
   }
 
   sendJson(response, 404, { error: 'Not found' }, request);
-}));
-
-server.listen(PORT, () => {
-  console.log(`AI intent API listening on http://localhost:${PORT}`);
-  console.log(`  POST /api/listings        (create listing in Firestore)`);
-  console.log(`  GET  /api/listings/:id    (retrieve listing by ID from Firestore)`);
-  console.log(`  POST /api/extract-listing   (transcript -> structured listing data)`);
-  console.log(`  POST /api/conversation/turn (multi-turn conversation management)`);
-  console.log(`  GET/DELETE /api/conversation/:session_id (get/delete conversation session)`);
-  console.log(`  POST /api/voice-assistant (unified, stateful, 9 intents)`);
-  console.log(`  POST /api/voice-intent, /api/assistant-response (legacy, with fallback)`);
-  console.log(`  GET  /health, /api/health  (health check)`);
-  console.log(`  GET  /docs                (Swagger/OpenAPI documentation)`);
-  console.log(`  GET/POST /api/produce, /api/produce/:id, PUT/DELETE /api/produce/:id`);
-  console.log(`  GET /api/buyer-requirements, POST /api/marketplace/search`);
-  console.log(`Firestore: ${db ? 'connected' : 'NOT initialized - writes will fail'}`);
-  console.log(`Allowed origin: ${process.env.AI_ALLOWED_ORIGIN ?? '(auto: any localhost)'}  -> try http://localhost:5173`);
 });
 
 const server = http.createServer(apiHandler);
@@ -1898,6 +1894,7 @@ if (isMainModule) {
     console.log(`  GET  /docs                (Swagger/OpenAPI documentation)`);
     console.log(`  GET/POST /api/produce, /api/produce/:id, PUT/DELETE /api/produce/:id`);
     console.log(`  GET /api/buyer-requirements, POST /api/marketplace/search`);
+    console.log(`Firestore: ${db ? 'connected' : 'NOT initialized - writes will fail'}`);
     console.log(`Allowed origin: ${process.env.AI_ALLOWED_ORIGIN ?? '(auto: any localhost)'}  -> try http://localhost:5173`);
   });
 

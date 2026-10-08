@@ -148,6 +148,26 @@ async function getListingById(listingId) {
   return inMemoryListings.get(listingId) || null;
 }
 
+// Read-only listing. No validation, no write — used by the Producer Dashboard
+// bridge (GET /api/listings) so Twilio-created listings become visible there.
+async function getAllListings() {
+  if (!db) {
+    throw new Error('Firestore is not initialized. Check FIREBASE_SERVICE_ACCOUNT_PATH.');
+  }
+
+  const snap = await db.collection(COLLECTION_NAME).get();
+  const listings = snap.docs.map((doc) => doc.data());
+
+  // Newest first so freshly created voice listings show up on top.
+  listings.sort((a, b) => {
+    const av = a?.created_at?.toMillis?.() ?? 0;
+    const bv = b?.created_at?.toMillis?.() ?? 0;
+    return bv - av;
+  });
+
+  return listings;
+}
+
 export {
   COLLECTION_NAME,
   generateListingId,
@@ -155,4 +175,5 @@ export {
   buildListingDoc,
   createListing,
   getListingById,
+  getAllListings,
 };

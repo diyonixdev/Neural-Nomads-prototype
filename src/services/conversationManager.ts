@@ -969,8 +969,89 @@ const applyBareNumberAndCorrections = (
   }
 };
 
+// ── Grade-answer normalization ─────────────────────────────────────────────
+// Speech-to-text renders a grade answer in many shapes: "Grade A", "A grade",
+// "quality A", "grade, a", "grade-a", "Grade A.", "ग्रेड ए". Every one of them
+// must land on the quality slot — otherwise the engine drops the answer, never
+// fills quality and re-asks the same question forever. One normalizer strips
+// punctuation and Devanagari so the matchers below do not depend on word order.
+const GRADE_WORD = '(?:grade|quality|kism|kisam|darja)';
+const GRADE_LETTER = '(a|ay|ey|ai|aay|b|bee|be|bi|c|see|sea|ci|si)';
+const GRADE_TAIL = '(?:\\s+(?:hai|hain|he|is|ji))?';
+const GRADE_LETTER_MAP: Record<string, string> = {
+  a: 'A', ay: 'A', ey: 'A', ai: 'A', aay: 'A',
+  b: 'B', bee: 'B', be: 'B', bi: 'B',
+  c: 'C', see: 'C', sea: 'C', ci: 'C', si: 'C',
+};
+const DEV_GRADE_WORD_SRC = '\\u0917\\u094d\\u0930\\u0947\\u0921|\\u0921\\u093f\\u0917\\u094d\\u0930\\u0940|\\u0915\\u093f\\u0938\\u094d\\u092e|\\u0926\\u0930\\u091c\\u093e';
+const DEV_LETTER_SRC = '\\u0910|\\u092c\\u0940|\\u0938\\u0940';
+const DEV_GRADE_WORD = new RegExp(DEV_GRADE_WORD_SRC);
+const DEV_GRADE_WORD_G = new RegExp(DEV_GRADE_WORD_SRC, 'g');
+const DEV_LETTER_G = new RegExp(DEV_LETTER_SRC, 'g');
+
+export const normalizeGradeSpeech = (raw: unknown): string => {
+  let s = String(raw == null ? '' : raw).toLowerCase();
+  // Devanagari grade answers ("ग्रेड ए", bare "बी") map onto their Latin
+  // letters, but only when the utterance really is a grade answer. Hindi words
+  // that merely contain those letter signs (किसी, बीमार) must stay untouched.
+  const devRun = s.replace(/[^\u0900-\u097f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (devRun) {
+    const isGradeUtterance = DEV_GRADE_WORD.test(devRun)
+      || devRun.replace(DEV_GRADE_WORD_G, '').replace(DEV_LETTER_G, '').replace(/\s+/g, ' ').trim() === '';
+    if (isGradeUtterance) {
+      s = s
+        .replace(new RegExp(DEV_GRADE_WORD_SRC, 'g'), ' grade ')
+        .replace(/ए/g, ' a ')
+        .replace(/बी/g, ' b ')
+        .replace(/सी/g, ' c ');
+    }
+  }
+  s = s.replace(/[^a-z0-9]+/g, ' ');
+  return s.replace(/\s+/g, ' ').trim();
+};
+
+// Parses ONLY a grade value (Grade A / B / C). Explicit grade phrases work in
+// either word order and do not depend on the quality question being pending;
+// a bare letter ("A") only counts while we are actually waiting for the
+// quality answer, so single letters can never hijack another slot.
+export const parseGradeAnswer = (text: string, askedQuality: boolean): string | null => {
+  const n = normalizeGradeSpeech(text);
+  if (!n) return null;
+  const letterOf = (raw: string | undefined): string | null => (raw && GRADE_LETTER_MAP[raw]) || null;
+  const explicit = new RegExp(`\\b${GRADE_WORD}\\s+${GRADE_LETTER}${GRADE_TAIL}\\b`).exec(n)
+    || new RegExp(`\\b${GRADE_LETTER}\\s+${GRADE_WORD}${GRADE_TAIL}\\b`).exec(n);
+  if (explicit) {
+    const g = letterOf(explicit[1]);
+    if (g) return `Grade ${g}`;
+  }
+  if (askedQuality) {
+    const bare = new RegExp(`^${GRADE_LETTER}${GRADE_TAIL}$`).exec(n);
+    if (bare) {
+      const g = letterOf(bare[1]);
+      if (g) return `Grade ${g}`;
+    }
+  }
+  return null;
+};
+
+// True when the whole utterance is nothing but a grade answer. Such a turn
+// must not write into any other slot: the word detectors would otherwise store
+// "B Grade" / "C" as the location or the farmer name.
+export const isPureGradeAnswer = (text: string, askedQuality: boolean): boolean => {
+  const n = normalizeGradeSpeech(text);
+  if (!n) return false;
+  if (new RegExp(`^(?:${GRADE_WORD}\\s+${GRADE_LETTER}|${GRADE_LETTER}\\s+${GRADE_WORD})${GRADE_TAIL}$`).test(n)) {
+    return true;
+  }
+  return !!askedQuality && new RegExp(`^${GRADE_LETTER}${GRADE_TAIL}$`).test(n);
+};
+
 // Map common Hinglish/Hindi quality answers onto schema-friendly values.
 const parseQualityAnswer = (text: string): string | null => {
+  // Tolerant grade parsing first: "A grade" / "quality B" / "grade, a" used to
+  // fall through every pattern below and the agent re-asked forever.
+  const gradeAnswer = parseGradeAnswer(text, true);
+  if (gradeAnswer) return gradeAnswer;
   const grade = parseGrade(text);
   if (grade) return grade;
   const lower = text.toLowerCase().trim();
@@ -1113,7 +1194,7 @@ const extractTurnData = (text: string, session: ConversationSession): Partial<Li
     ...parseQuantity(text),
     asking_price: parsePrice(text),
     price_unit: null as string | null,
-    quality: parseGrade(text),
+    quality: parseGradeAnswer(text, session.last_asked === 'quality') ?? parseGrade(text),
     intent: parseIntent(text),
     location: session.last_asked === 'farmer_name' ? null : detectLocation(text),
     farmer_name: null,
@@ -1170,6 +1251,16 @@ const extractTurnData = (text: string, session: ConversationSession): Partial<Li
   if (phoneFromText) extracted.phone = phoneFromText;
   applyBareNumberAndCorrections(text, extracted, session);
   applySlotFallbacks(text, extracted, session);
+
+  // A turn that is ONLY a grade answer ("Grade A", "A grade", "quality B")
+  // carries no other slot value. The word detectors must never store the grade
+  // itself as location / farmer name / product ("B Grade", "C") — null means
+  // "leave the stored value alone" (same convention as product).
+  if (isPureGradeAnswer(text, session.last_asked === 'quality')) {
+    (extracted as any).product = null;
+    extracted.location = null;
+    extracted.farmer_name = null;
+  }
 
   if (extracted.price_unit === null && extracted.asking_price != null) {
     extracted.price_unit = 'kg';

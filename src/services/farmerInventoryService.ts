@@ -12,6 +12,32 @@ import { mockProduceListings, mockFarmers } from '../data/mockData';
 
 const STORAGE_KEY = 'farmdirect_farmer_inventory_v1';
 const API_ENDPOINT = '/api/produce';
+// Read-only endpoint used to bridge Firestore (Twilio-created listings) into
+// the Producer Dashboard without a second submission path.
+const LISTINGS_ENDPOINT = '/api/listings';
+
+/** Raw shape stored by server/listingService.mjs (POST /api/listings). */
+export interface VoiceListing {
+  listing_id?: string;
+  farmer_name?: string | null;
+  phone?: string | null;
+  product?: string | null;
+  quantity?: number | null;
+  unit?: string | null;
+  asking_price?: number | null;
+  price_unit?: string | null;
+  location?: string | null;
+  quality?: string | null;
+  intent?: string | null;
+  status?: string | null;
+}
+
+/**
+ * A Produce as shown in the dashboard, carrying the original voice-listing
+ * fields alongside it (Produce itself has no farmer_name/phone/intent).
+ * `location` is omitted because Produce already owns a normalized `location`.
+ */
+export type DashboardProduce = Produce & Omit<Partial<VoiceListing>, 'location'>;
 
 export type ProduceUnit = 'kg' | 'quintal' | 'tonne' | 'bag';
 
@@ -77,10 +103,112 @@ const setStored = (list: Produce[]) => {
   }
 };
 
+const notifyListeners = (count?: number) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('farmdirect:inventory-updated', { detail: { count } }));
+};
+
+// Build a Produce from a raw voice listing. Shared by addVoiceListing() (web
+// flow) and mapListingToProduce() (Twilio/API flow) so both produce the exact
+// same object and can be merged by id without duplication.
+function buildProduceFromListing(listing: VoiceListing, farmerId: string = 'f-001'): Produce {
+  const farmer = mockFarmers.find((f) => f.id === farmerId) ?? mockFarmers[0];
+  const product = String(listing.product || 'Unknown');
+  const lower = product.toLowerCase();
+  const quantity = Number(listing.quantity) || 0;
+  const unit = (listing.unit || 'kg') as ProduceUnit;
+  const quantityKg = unitToKg(quantity, unit);
+  const askingPrice = Number(listing.asking_price) || 0;
+  const quality = listing.quality || 'Grade A';
+  const location = listing.location || 'Unknown';
+  const grade: ProduceGrade = /organic/i.test(quality) ? 'Organic Premium' : /b/i.test(quality) ? 'Grade B' : 'Grade A';
+
+  let category: ProduceCategory = 'vegetables';
+  if (/(tomato|potato|onion|carrot|peas|cauliflower|cabbage|bhindi|palak|mirch|gobhi)/i.test(lower)) category = 'vegetables';
+  else if (/(apple|banana|mango|seb|kela|aam)/i.test(lower)) category = 'fruits';
+  else if (/(wheat|rice|gehun|chawal|corn|maize|bajra|jowar)/i.test(lower)) category = 'grains';
+  else if (/(dal|chana|moong|masoor|urad|arhar|moongfali)/i.test(lower)) category = 'pulses';
+
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const defaultShelf = category === 'grains' ? 180 : category === 'fruits' ? 7 : 5;
+  const id = listing.listing_id || `prod-voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+  return {
+    id,
+    name: `${quality} ${product} - ${farmer.name}`,
+    nameHi: `${quality} ${product} - ${farmer.name}`,
+    category,
+    grade,
+    quantityKg,
+    expectedPricePerKg: askingPrice,
+    mandiPricePerKg: Math.round(askingPrice * 0.75),
+    harvestDate: today,
+    location: location.includes(',') ? location : `${location}, ${farmer.state || 'Uttar Pradesh'}`,
+    state: farmer.state || 'Uttar Pradesh',
+    farmerId,
+    fpoId: farmer.fpoId,
+    availableFrom: `${today}T06:00:00+05:30`,
+    availableUntil: new Date(now.getTime() + defaultShelf * 86400000).toISOString(),
+    shelfLifeDays: defaultShelf,
+    pesticideResidueStatus: 'clear' as const,
+    certifications: [grade],
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * Map one Firestore/API listing onto a dashboard Produce, keeping the raw
+ * voice-listing fields (farmer_name, phone, intent, ...) on the object.
+ */
+function mapListingToProduce(listing: VoiceListing): DashboardProduce {
+  const produce = buildProduceFromListing(listing);
+  const { location: _listingLocation, ...voiceFields } = listing;
+  return { ...produce, ...voiceFields };
+}
+
+// ---- read-side bridge: GET /api/listings -> dashboard ----------------------
+const remoteListings: DashboardProduce[] = [];
+let remoteLoaded = false;
+let remoteSync: Promise<void> | null = null;
+
+const fetchRemote = (force = false): Promise<void> => {
+  if (remoteSync && !force) return remoteSync;
+  const task = (async () => {
+    try {
+      const res = await fetch(LISTINGS_ENDPOINT, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { listings?: VoiceListing[] } | VoiceListing[];
+      const items: VoiceListing[] = Array.isArray(data) ? data : (data?.listings ?? []);
+      remoteListings.length = 0;
+      for (const item of items) remoteListings.push(mapListingToProduce(item));
+      remoteLoaded = true;
+      notifyListeners(remoteListings.length);
+    } catch {
+      // Backend not reachable — keep mock + localStorage data as-is and allow
+      // a later retry. Never throws: this is a read-only best-effort bridge.
+      remoteLoaded = false;
+    }
+  })();
+  remoteSync = task;
+  void task.then(() => {
+    if (!remoteLoaded && remoteSync === task) remoteSync = null;
+  });
+  return task;
+};
+
+const ensureRemoteSync = () => {
+  if (remoteLoaded || remoteSync) return;
+  void fetchRemote();
+};
+
 const mergeWithMock = (stored: Produce[]): Produce[] => {
-  // stored overrides mock by id; otherwise append
+  // stored overrides mock by id; remote (Twilio) listings merge in by
+  // listing_id — same key addVoiceListing() uses — so nothing is duplicated.
   const map = new Map<string, Produce>();
   for (const p of mockProduceListings) map.set(p.id, p);
+  for (const p of remoteListings) map.set(p.id, p);
   for (const p of stored) map.set(p.id, p);
   return Array.from(map.values());
 };
@@ -88,7 +216,20 @@ const mergeWithMock = (stored: Produce[]): Produce[] => {
 export const farmerInventoryService = {
   // ---- read ----
   getAllListings(): Produce[] {
+    // Kick off the read-only Firestore bridge on first read; results arrive
+    // through the existing 'farmdirect:inventory-updated' event, so no
+    // dashboard component changes are needed.
+    ensureRemoteSync();
     return mergeWithMock(getStored());
+  },
+
+  /**
+   * Force a fresh read of GET /api/listings and re-merge. Read-only: it never
+   * creates, duplicates or submits a listing.
+   */
+  async syncFromApi(): Promise<Produce[]> {
+    await fetchRemote(true);
+    return this.getAllListings();
   },
 
   getMyProduce(farmerId: string = 'f-001'): Produce[] {
@@ -223,6 +364,7 @@ export const farmerInventoryService = {
 
   // utility for UI to subscribe to changes
   subscribe(callback: () => void): () => void {
+    ensureRemoteSync();
     const handler = () => callback();
     window.addEventListener('farmdirect:inventory-updated', handler);
     window.addEventListener('storage', handler);
@@ -241,64 +383,9 @@ export const farmerInventoryService = {
    * Store a voice-created listing as a Produce item so it appears in My Produce.
    * Called after POST /api/listings succeeds — bridges Firestore → localStorage.
    */
-  addVoiceListing(listing: {
-    farmer_name?: string | null;
-    phone?: string | null;
-    product?: string | null;
-    quantity?: number | null;
-    unit?: string | null;
-    asking_price?: number | null;
-    price_unit?: string | null;
-    location?: string | null;
-    quality?: string | null;
-    listing_id?: string;
-  }): Produce {
+  addVoiceListing(listing: VoiceListing): Produce {
     console.log('[ADD_VOICE_LISTING] Input:', JSON.stringify(listing, null, 2));
-    const farmerId = 'f-001';
-    const farmer = mockFarmers.find((f) => f.id === farmerId) ?? mockFarmers[0];
-    const product = String(listing.product || 'Unknown');
-    const lower = product.toLowerCase();
-    const quantity = Number(listing.quantity) || 0;
-    const unit = (listing.unit || 'kg') as ProduceUnit;
-    const quantityKg = unitToKg(quantity, unit);
-    const askingPrice = Number(listing.asking_price) || 0;
-    const quality = listing.quality || 'Grade A';
-    const location = listing.location || 'Unknown';
-    const grade: ProduceGrade = /organic/i.test(quality) ? 'Organic Premium' : /b/i.test(quality) ? 'Grade B' : 'Grade A';
-
-    let category: ProduceCategory = 'vegetables';
-    if (/(tomato|potato|onion|carrot|peas|cauliflower|cabbage|bhindi|palak|mirch|gobhi)/i.test(lower)) category = 'vegetables';
-    else if (/(apple|banana|mango|seb|kela|aam)/i.test(lower)) category = 'fruits';
-    else if (/(wheat|rice|gehun|chawal|corn|maize|bajra|jowar)/i.test(lower)) category = 'grains';
-    else if (/(dal|chana|moong|masoor|urad|arhar|moongfali)/i.test(lower)) category = 'pulses';
-
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    const defaultShelf = category === 'grains' ? 180 : category === 'fruits' ? 7 : 5;
-    const id = listing.listing_id || `prod-voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-    const produce: Produce = {
-      id,
-      name: `${quality} ${product} - ${farmer.name}`,
-      nameHi: `${quality} ${product} - ${farmer.name}`,
-      category,
-      grade,
-      quantityKg,
-      expectedPricePerKg: askingPrice,
-      mandiPricePerKg: Math.round(askingPrice * 0.75),
-      harvestDate: today,
-      location: location.includes(',') ? location : `${location}, ${farmer.state || 'Uttar Pradesh'}`,
-      state: farmer.state || 'Uttar Pradesh',
-      farmerId,
-      fpoId: farmer.fpoId,
-      availableFrom: `${today}T06:00:00+05:30`,
-      availableUntil: new Date(now.getTime() + defaultShelf * 86400000).toISOString(),
-      shelfLifeDays: defaultShelf,
-      pesticideResidueStatus: 'clear' as const,
-      certifications: [grade],
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    };
+    const produce = buildProduceFromListing(listing);
 
     const stored = getStored();
     stored.unshift(produce);
@@ -308,7 +395,7 @@ export const farmerInventoryService = {
       // setStored threw — localStorage failed; fall back to direct write
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-        window.dispatchEvent(new CustomEvent('farmdirect:inventory-updated', { detail: { count: stored.length } }));
+        notifyListeners(stored.length);
       } catch {
         console.error('Failed to persist inventory after retry');
       }

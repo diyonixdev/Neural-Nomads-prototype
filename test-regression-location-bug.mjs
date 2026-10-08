@@ -36,7 +36,7 @@ console.log('=== FULL FLOW ===');
 {
   const sid = 'reg-flow';
   createSession(sid);
-  let r = await processTurn(sid, 'Aalu'); check('flow product', r.listing.product, 'Aalu');
+  let r = await processTurn(sid, 'Aalu'); check('flow product', r.listing.product, 'Potato');
   r = await processTurn(sid, 'Tira'); check('flow name', r.listing.farmer_name, 'Tira'); check('flow name-no-loc', r.listing.location, null);
   r = await processTurn(sid, '2 kg'); check('flow qty', r.listing.quantity, 2);
   r = await processTurn(sid, 'Ghaziabad'); check('flow loc', r.listing.location, 'Ghaziabad');

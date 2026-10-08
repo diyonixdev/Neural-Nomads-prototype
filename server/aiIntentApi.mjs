@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createListing, getListingById } from './listingService.mjs';
+import { createListing, getListingById, getAllListings } from './listingService.mjs';
 import { db } from './firebase.mjs';
 import { processTurn, getSession, deleteSession, STATES } from './conversationManager.mjs';
 import { handleIncomingCall, handleSpeechResult } from './twilioVoice.mjs';
@@ -702,6 +702,19 @@ const server = http.createServer(withRequestTimeout(async (request, response) =>
         console.error('[LISTINGS] Firestore error:', msg);
         sendJson(response, 500, { success: false, error: 'Failed to create listing' }, request);
       }
+    }
+    return;
+  }
+
+  // ===== LIST LISTINGS (read-only, for the Producer Dashboard bridge) =====
+  if (method === 'GET' && pathname === '/api/listings') {
+    console.log('[LISTINGS] GET /api/listings');
+    try {
+      const listings = await getAllListings();
+      sendJson(response, 200, { success: true, count: listings.length, listings }, request);
+    } catch (err) {
+      console.error('[LISTINGS] Firestore list error:', err.message || err);
+      sendJson(response, 500, { success: false, error: 'Failed to list listings' }, request);
     }
     return;
   }

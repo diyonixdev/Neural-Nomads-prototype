@@ -91,6 +91,11 @@ export const FarmerDashboardPage: React.FC = () => {
   // e.g. voice submissions on /farmer/voice) and subscribe to live updates.
   useEffect(() => {
     setMyProduce(farmerInventoryService.getMyProduce(CURRENT_FARMER_ID));
+    // The GET /api/listings snapshot is fetched only once per session, so a
+    // listing created after that first fetch would stay invisible until a full
+    // reload. Force a read-only source refresh on every mount; completion
+    // dispatches the existing event the subscription below already handles.
+    void farmerInventoryService.syncFromApi();
     const unsub = farmerInventoryService.subscribe(() =>
       setMyProduce(farmerInventoryService.getMyProduce(CURRENT_FARMER_ID)),
     );

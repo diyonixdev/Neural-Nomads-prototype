@@ -1,7 +1,8 @@
 // Twilio voice adapter for FarmDirect
 // Reuses the existing conversation manager (processTurn, etc.) without modifying it.
 
-import { processTurn, createSession, getSession, deleteSession, STATES, EMPTY_LISTING } from './conversationManager.mjs';
+import { processTurn, createSession, getSession, STATES, SUCCESS_MESSAGE, isConfirmationAffirmative } from './conversationManager.mjs';
+import { normalizeProduct } from './extractListingParser.mjs';
 // NOTE: createListing() is intentionally NOT imported. The listing is created
 // only by the conversation manager itself (submitListing inside processTurn);
 // the adapter never writes a listing to Firestore.
@@ -48,7 +49,7 @@ const escapeXml = (value) => String(value ?? '')
 const buildSayGather = (message, action = HANDLE_ACTION, method = 'POST') => {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather input="speech" action="${action}" method="${method}" timeout="8" speechTimeout="5" speechModel="phone_call" language="hi-IN" enhanced="true" finishOnKey="#" actionOnEmptyResult="true">
+  <Gather input="speech" action="${action}" method="${method}" timeout="8" speechTimeout="3" speechModel="phone_call" language="hi-IN" enhanced="true" finishOnKey="#" actionOnEmptyResult="true">
     <Say language="hi-IN">${escapeXml(message)}</Say>
   </Gather>
   <Redirect method="${method}">${action}</Redirect>
@@ -76,94 +77,30 @@ const lastAgentQuestion = (sessionObj) => {
   return null;
 };
 
+// The manager's itemised confirmation summary ("Ek baar dekh lo... Sab sahi
+// hai?") must never be replayed on a timeout/echo/duplicate: repeating it is
+// what made the farmer think another confirmation was still pending.
+const isConfirmationSummary = (text) => /ek baar dekh lo|just to confirm/i.test(String(text || ''));
+
 const buildReprompt = (sessionId) => {
   const sessionObj = getSession(sessionId);
-  const prompt = lastAgentQuestion(sessionObj)
-    || (sessionObj?.listing?.product
-      ? 'Achha ji. Aapka naam kya hai ji?'
-      : 'Namaste ji, FarmDirect se bol raha hoon. Aap kya bechna chahte hain ji?');
+  const last = lastAgentQuestion(sessionObj);
+  if (last && !isConfirmationSummary(last)) return buildSayGather(last);
+  if (sessionObj?.state === STATES.CONFIRMING || isConfirmationSummary(last)) {
+    return buildSayGather('Ji, agar sab sahi hai toh haan bol dijiye.');
+  }
+  const prompt = sessionObj?.listing?.product
+    ? 'Achha ji. Aapka naam kya hai ji?'
+    : 'Namaste ji, FarmDirect se bol raha hoon. Aap kya bechna chahte hain ji?';
   return buildSayGather(prompt);
 };
 
-// --- Adapter-only listing preserve/restore ------------------------------------
-// The manager's extraction can clear a field the caller was NOT answering (e.g.
-// answering "Diya" for the name question makes the bare-word product heuristic
-// fill product, which the manager then clears). The manager stays the single
-// source of truth: we only put a field back when ALL of these hold:
-//   (a) it held a valid value BEFORE this turn,
-//   (b) it is empty AFTER this turn,
-//   (c) it is not the field the caller was answering (prev last_asked), and
-//   (d) the utterance is not an explicit correction that produced no parsed
-//       value anywhere (then we step aside and let the manager re-ask).
-// A value the manager just set/changed is never overwritten, so intentional
-// corrections always win. No comparison against agent_message is made.
-const RESTORE_FIELDS = ['product', 'farmer_name', 'quantity', 'unit', 'location', 'quality', 'asking_price', 'price_unit', 'phone', 'intent'];
-
-const isEmptyFieldValue = (value) => value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
-
-// Mirrors the manager's own isCorrectionText() so an interruption/correction
-// utterance ("Aalu nahi, Pyaaj", "Nahi, 25") is recognised the same way here.
-const CORRECTION_MARKERS = /^(nahi|nahin|no|nope|galat|wrong|wait|actually|arre|arey|oops|sorry)\b|\b(galat|wrong|change|badal|nahi\s*,|actually\s*,|arre\s*,|arey\s*,|not\s+\d|sorry)\b/i;
-const isCorrectionUtterance = (text) => CORRECTION_MARKERS.test(String(text ?? '').trim());
-
-const snapshotTurnState = (sessionId) => {
-  const sessionObj = getSession(sessionId);
-  if (!sessionObj) return null;
-  return { listing: { ...(sessionObj.listing || {}) }, last_asked: sessionObj.last_asked ?? null };
-};
-
-const restoreWipedFields = (snapshot, sessionId, utterance) => {
-  if (!snapshot) return [];
-  const sessionObj = getSession(sessionId);
-  if (!sessionObj || !sessionObj.listing) return [];
-  // Distinguish a correction/interruption from a normal next-field answer.
-  // If the correction produced no parsed value anywhere, it is ambiguous — do
-  // not resurrect old values, let the manager re-ask the field instead. If it
-  // did produce a value, that value already wins via the "empty after" check
-  // below and unrelated wiped fields are restored as usual.
-  if (isCorrectionUtterance(utterance)) {
-    const producedValue = RESTORE_FIELDS.some(
-      (field) => !isEmptyFieldValue(sessionObj.listing[field]) && sessionObj.listing[field] !== snapshot.listing[field],
-    );
-    if (!producedValue) return [];
-  }
-  const restored = [];
-  for (const field of RESTORE_FIELDS) {
-    if (isEmptyFieldValue(snapshot.listing[field])) continue;    // was not valid before this turn
-    if (!isEmptyFieldValue(sessionObj.listing[field])) continue; // manager set/kept a value — new value wins
-    if (snapshot.last_asked === field) continue;                 // caller was answering this field
-    sessionObj.listing[field] = snapshot.listing[field];
-    restored.push(field);
-  }
-  return restored;
-};
-
-// Snapshot → processTurn → restore only unexpectedly-cleared fields. If the
-// manager is now re-asking for a field we just put back, the restored value is
-// handed straight back to processTurn so the manager itself derives the correct
-// next question (never a second state machine / no duplicated conversation
-// logic, no direct Firestore access).
-const isTerminalTurnState = (state) => state === STATES.SUCCESS || state === STATES.SUBMITTING || state === STATES.CANCELLED;
-
-export const processTurnPreservingFields = async (sessionId, utterance) => {
-  const snapshot = snapshotTurnState(sessionId);
-  let turnResult = await processTurn(sessionId, utterance);
-  const restored = restoreWipedFields(snapshot, sessionId, utterance);
-  if (restored.length) {
-    console.log('[TWILIO] Restored unexpectedly cleared field(s):', restored, { sessionId });
-    const sessionObj = getSession(sessionId);
-    const askField = sessionObj && restored.includes(sessionObj.last_asked) ? sessionObj.last_asked : null;
-    if (askField && !isTerminalTurnState(turnResult?.state)) {
-      console.log('[TWILIO] Re-establishing turn through processTurn for restored field:', { askField, sessionId });
-      const reAskSnapshot = snapshotTurnState(sessionId);
-      turnResult = await processTurn(sessionId, String(snapshot.listing[askField]));
-      restoreWipedFields(reAskSnapshot, sessionId, null);
-    }
-    const liveSession = getSession(sessionId);
-    if (liveSession?.listing) turnResult = { ...turnResult, listing: { ...liveSession.listing } };
-  }
-  return turnResult;
-};
+// --- Adapter role ---------------------------------------------------------------
+// Thin transport only: TwiML build/parse, per-call guards (fragment / overlap /
+// duplicate), and one processTurn() call per user utterance. All conversation
+// state — field order, questions, corrections, confirmation and listing
+// creation — lives in conversationManager.mjs (processTurn is the single
+// source of truth; this file runs it exactly once per turn).
 
 export const handleIncomingCall = async (request, response) => {
   try {
@@ -254,9 +191,19 @@ export const handleSpeechResult = async (request, response) => {
       const sessionObj = getSession(sessionId);
       if (sessionObj && sessionObj.listing) {
         const norm = speechResult.trim().toLowerCase().replace(/[.,!?;:()]/g, '');
+        // Canonical product duplicate: a raw echo such as "Aalu" must match the
+        // stored canonical product ("Potato") — normalizeProduct() is the
+        // parser's existing vocabulary. Only single-word utterances are
+        // canonicalized, so a genuine multi-field turn (e.g. a correction that
+        // also mentions the product) is never swallowed.
+        const words = norm.split(/\s+/).filter(Boolean);
+        const canonSpeechProduct = words.length === 1
+          ? String(normalizeProduct(norm) || '').toLowerCase()
+          : '';
         const fields = { product: sessionObj.listing.product, farmer_name: sessionObj.listing.farmer_name, location: sessionObj.listing.location, quality: sessionObj.listing.quality, asking_price: String(sessionObj.listing.asking_price ?? ''), phone: sessionObj.listing.phone };
         for (const [k, v] of Object.entries(fields)) {
-          if (v && norm === String(v).toLowerCase().replace(/[.,!?;:()]/g, '')) {
+          const normValue = String(v).toLowerCase().replace(/[.,!?;:()]/g, '');
+          if (v && (norm === normValue || (k === 'product' && canonSpeechProduct && canonSpeechProduct === normValue))) {
             duplicateSkip = true;
             break;
           }
@@ -270,31 +217,25 @@ export const handleSpeechResult = async (request, response) => {
       return;
     }
 
-    // Adapter-only: normalize natural affirmative confirmation phrases for phone
-    // Only during confirmation stage, and only when text is clearly affirmative.
+    // Adapter-only: canonicalise a natural affirmative to "haan" before it
+    // reaches the manager. Gated on the manager's own matcher so a turn that
+    // also carries field data ("theek hai, quantity 15 kilo") is NEVER rewritten
+    // into a bare yes — it must reach processTurn() as the correction it is.
     let processedSpeech = speechResult;
     try {
       const sessionObj = getSession(sessionId);
-      if (sessionObj && (sessionObj.confirmation_stage === 'confirmation' || sessionObj.confirmation_stage === 'changes' || sessionObj.confirmation_stage === null && sessionObj.state === 'CONFIRMING' || sessionObj.listing?.quality && sessionObj.listing?.asking_price && sessionObj.listing?.phone)) {
-        const lower = speechResult.trim().toLowerCase();
-        if (/\b(haan|ji\s*haan|bilkul|theek|sahi|ok)\b/i.test(lower) && !/\b(nahi|nahin|no|galat|badal)\b/i.test(lower)) {
-          // Normalize common natural confirmations to canonical form manager expects
-          if (/\bsab\s+theek\b/i.test(lower) || /\bhaan\s+sab\b/i.test(lower)) processedSpeech = 'haan sab theek hai';
-          else if (/\bji\s+haan\b/i.test(lower)) processedSpeech = 'ji haan';
-          else if (/\bbilkul\s+theek\b/i.test(lower)) processedSpeech = 'bilkul theek hai';
-          else if (/\btheek\s+hai\b/i.test(lower)) processedSpeech = 'theek hai';
-          else if (/\bhaan\b/i.test(lower)) processedSpeech = 'haan';
-        }
+      if (sessionObj?.state === STATES.CONFIRMING && isConfirmationAffirmative(speechResult)) {
+        processedSpeech = 'haan';
       }
     } catch (e) { /* ignore */ }
 
-    // Process the utterance through the existing conversation manager, wrapped
-    // with adapter-only preserve/restore (see processTurnPreservingFields).
+    // Process the utterance through the conversation manager — exactly one
+    // processTurn() call per user turn (no wrapper, no second state machine).
     console.log('[TWILIO] Calling processTurn with:', {
       sessionId,
       speechResult: processedSpeech,
     });
-    const turnResult = await processTurnPreservingFields(sessionId, processedSpeech);
+    const turnResult = await processTurn(sessionId, processedSpeech);
     console.log('[TWILIO] processTurn result:', { callSid, state: turnResult?.state, agent_message: turnResult?.agent_message, sessionId });
 
     let twiml;
@@ -318,7 +259,7 @@ export const handleSpeechResult = async (request, response) => {
           listing_id: turnResult.listing_id ?? null,
           sessionId,
         });
-        twiml = buildSayAndHangup('Dhanyawaad ji! Aapki listing successfully create ho gayi hai. Dhanyawaad!');
+        twiml = buildSayAndHangup(turnResult.agent_message || SUCCESS_MESSAGE);
         callSidToSessionId.delete(callSid);
         // Manager session is left in place on purpose (it already holds the
         // submitted listing); deleteSession(sessionId) is intentionally not called.

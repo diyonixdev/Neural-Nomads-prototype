@@ -1,4 +1,4 @@
-import { extractListingFallback, looksLikeCleanValue, extractNameFromText as extractNameFromTextImported } from './extractListingParser.mjs';
+import { extractListingFallback, looksLikeCleanValue, extractNameFromText as extractNameFromTextImported, normalizeProduct, parseQuantity, parsePrice, detectAnyLocation } from './extractListingParser.mjs';
 
 const LISTINGS_API_URL = process.env.LISTINGS_API_URL || 'http://localhost:8787/api/listings';
 
@@ -97,6 +97,16 @@ const EMPTY_LISTING = {
 const REQUIRED_FIELDS = ['farmer_name', 'phone', 'product', 'quantity', 'unit', 'asking_price', 'price_unit', 'location', 'quality', 'intent'];
 
 const OPTIONAL_FIELDS = ['quality'];
+
+// Terminal success message for a submitted listing (spoken as-is by Twilio).
+export const SUCCESS_MESSAGE = 'Aapki listing ho gayi. FarmDirect se dhanyawaad!';
+
+// Short nudge used when the listing is already complete but the last utterance
+// carried nothing new. Deliberately does NOT repeat the itemised summary and
+// does NOT contain "ek baar dekh lo" / "just to confirm" (the Twilio adapter
+// keys off those phrases to detect a repeating confirmation loop).
+const shortConfirmMsg = (language) =>
+  farmerMsg(language, 'Ji, agar sab sahi hai toh haan bol dijiye.', 'If everything is correct, please just say yes.');
 
 const numberToHindiWords = (n, language = 'hinglish') => {
   if (n == null || isNaN(n)) return '';
@@ -674,6 +684,12 @@ const mergeListing = (existing, extracted) => {
   if (merged.asking_price !== null && merged.price_unit === null) {
     merged.price_unit = 'kg';
   }
+  if (merged.quantity !== null && merged.unit === null) {
+    merged.unit = 'kg';
+  }
+  if (merged.intent === null || merged.intent === undefined) {
+    merged.intent = 'sell';
+  }
   return merged;
 };
 
@@ -684,23 +700,24 @@ const getMissingRequiredFields = (listing) => {
 const isComplete = (listing) => getMissingRequiredFields(listing).length === 0;
 
 const getPriorityNextField = (missing) => {
-  // Strict conversation order: PRODUCT → NAME → QUANTITY → LOCATION → QUALITY → PRICE → CONFIRMATION
-  const order = ['product', 'farmer_name', 'quantity', 'unit', 'location', 'quality', 'asking_price', 'price_unit', 'phone', 'intent'];
-  for (const f of order) {
-    if (missing.includes(f)) return f;
-  }
-  return missing[0] || null;
+  // Strict conversation order: PRODUCT → NAME → LOCATION → QUANTITY → QUALITY → PRICE → PHONE
+  // unit / price_unit / intent are auto-derived in mergeListing and are never asked.
+  const order = ['product', 'farmer_name', 'location', 'quantity', 'quality', 'asking_price', 'phone'];
+  const next = order.find((f) => missing.includes(f));
+  if (next) return next;
+  return missing.find((f) => !['unit', 'price_unit', 'intent'].includes(f)) || null;
 };
 
 const generateQuestion = (field, language) => {
   if (isHiLang(language)) {
     const questions = {
-      product: 'Achha ji, kya bechna hai?',
-      quantity: 'Kitna maal hai?',
-      asking_price: 'Kitne rupaye kilo chahiye?',
-      location: 'Aap kahan se ho ji?',
-      phone: 'Aapka mobile number bataiye?',
+      product: 'Aaj kya bechna chahte hain ji?',
       farmer_name: 'Aapka naam kya hai ji?',
+      location: 'Aap kahan se hain ji?',
+      quantity: 'Kitna maal hai ji?',
+      quality: 'Aapke maal ki quality kya hai ji? Grade A, B ya C?',
+      asking_price: 'Kitne rupaye kilo mein bechna chahte hain ji?',
+      phone: 'Aapka phone number kya hai ji?',
       unit: 'Kisme hai — kilo, tonne, litre, piece?',
       price_unit: 'Yeh kimat per kya hai?',
       intent: 'Bechna hai kya?',
@@ -710,11 +727,12 @@ const generateQuestion = (field, language) => {
 
   const questions = {
     product: 'What do you want to sell?',
-    quantity: 'How much do you want to sell?',
-    asking_price: 'How much is the price?',
-    location: 'Where are you from?',
-    phone: 'What is your mobile number?',
     farmer_name: 'What is your name?',
+    location: 'Where are you from?',
+    quantity: 'How much do you want to sell?',
+    quality: 'What is the quality of your produce? Grade A, B, or C?',
+    asking_price: 'How much is the price?',
+    phone: 'What is your mobile number?',
     unit: 'What unit — kg, tonne, litre, piece?',
     price_unit: 'Is that price per kg?',
     intent: 'Do you want to sell?',
@@ -859,7 +877,7 @@ const buildAskMessage = (listing, extracted, prevListing, nextField, language) =
       return isHiLang(language) ? 'Sab set hai!' : 'All fields are complete!';
     }
     // Use the same priority order as getPriorityNextField
-    const order = ['product', 'quantity', 'asking_price', 'location', 'farmer_name', 'phone'];
+    const order = ['product', 'farmer_name', 'location', 'quantity', 'quality', 'asking_price', 'phone'];
     for (const f of order) {
       if (missing.includes(f)) {
         return buildAskMessage(listing, extracted, prevListing, f, language);
@@ -880,18 +898,68 @@ const buildAskMessage = (listing, extracted, prevListing, nextField, language) =
   return echo ? `${echo} ${question}` : question;
 };
 
+// Affirmation matching -------------------------------------------------------
+// STT returns the same "yes" many ways: Latin hinglish ("haan", "han",
+// "sab sahi hai") and Devanagari ("हाँ", "सब सही है"). We normalise to a small
+// roman token vocabulary, then accept ONLY short token sequences that START
+// with an affirmation word and consist entirely of affirmation/filler words.
+// Anything else (a field name, a number, a negation, arbitrary speech) is not
+// an affirmation, so it can never be mistaken for "yes".
+const AFFIRM_DEV_MAP = [
+  [/सब\s*कुछ\s*(सही|ठीक|बढ़िया|बढिया)\s*हैं?/g, 'sab kuch $1 hai'],
+  [/सब\s*सही\s*हैं?/g, 'sab sahi hai'],
+  [/सब\s*ठीक\s*हैं?/g, 'sab theek hai'],
+  [/हाँ|हां|हँ/g, 'haan'],
+  [/बढ़िया|बढिया/g, 'badhiya'],
+  [/ठीक/g, 'theek'],
+  [/सही/g, 'sahi'],
+  [/सब/g, 'sab'],
+  [/कुछ/g, 'kuch'],
+  [/हैं|है/g, 'hai'],
+  [/जी/g, 'ji'],
+];
+
+const AFFIRM_NEGATIVE = /\b(nahi|nahin|no|nope|cancel|ruk|stop|band|exit|quit|galat|wrong|change|modify|badal|badalna|edit|update|fix|wait|actually|lekin|par|but|however|sorry|oops)\b/i;
+const AFFIRM_NEGATIVE_DEV = /नही|रुक|ग़लत|गलत|बदल|रोक/;
+
+const AFFIRM_STARTERS = new Set([
+  'haan', 'ha', 'han', 'yes', 'yep', 'yup', 'ji', 'ok', 'okay', 'sahi', 'theek',
+  'bilkul', 'zaroor', 'pakka', 'definitely', 'sure', 'confirmed', 'confirm',
+  'correct', 'create', 'done', 'banado', 'bana', 'ho', 'sab', 'all', 'everything',
+  'badhiya', 'badiya', 'set', 'haanji', 'y', '+', 'accha', 'acha', 'perfect',
+  'great', 'clear', 'fine', 'good', 'right',
+]);
+
+const AFFIRM_TAIL = new Set([
+  'ji', 'haan', 'han', 'ha', 'haanji', 'sab', 'kuch', 'bilkul', 'theek', 'sahi',
+  'badhiya', 'badiya', 'set', 'hai', 'hain', 'he', 'ho', 'gaya', 'gayi', 'bana',
+  'do', 'done', 'ok', 'okay', 'correct', 'right', 'good', 'fine', 'clear',
+  'perfect', 'great', 'all', 'everything', 'yes', 'please', 'ab', 'sure',
+  'confirmed', 'accha', 'acha', 'y', '+', 'ban', 'gay', 'chuka', 'wala', 'wale',
+]);
+
+const normalizeAffirmation = (raw) => {
+  let s = String(raw ?? '').toLowerCase().trim();
+  if (!s) return '';
+  s = s.replace(/[\u2018\u2019\u201C\u201D'"`]/g, '');
+  s = s.replace(/[.,!?;:()\[\]{}|/\\]+/g, ' ');
+  for (const [re, to] of AFFIRM_DEV_MAP) s = s.replace(re, to);
+  // Any Devanagari we could not map is not a known affirmation -> drop it so
+  // it cannot smuggle a non-affirmative phrase past the token allow-list.
+  s = s.replace(/[\u0900-\u097F]+/g, ' ');
+  return s.replace(/\s+/g, ' ').trim();
+};
+
 const isConfirmationAffirmative = (text) => {
-  const lower = text.toLowerCase().trim().replace(/[.,!?]/g, '');
-  if (/^haan\s+(lekin|par|but|however)/i.test(lower)) return false;
-  if (/^(no|nahi|nahin|cancel|ruk|stop)/i.test(lower)) return false;
-  // If the text contains correction/change indicators, it's not a pure
-  // affirmation. "Haan, quantity badalni hai" should go to correction flow.
-  // Bare "correct" alone is affirmative (farmer confirming correctness).
-  if (lower !== 'correct' && /\b(badal|change|modify|galat|wrong|nahi|actually|wait|kuch|lekin|par|but|edit|update|correct|fix)\b/i.test(lower)) return false;
-  return /^(haan|ha|yes|yep|yup|ji haan|bilkul|correct|sahi|theek|ok|okay|ji|haanji|confirm|create|banado|bana do|\+|y|done|ho gaya|sahi hai|theek hai|sab sahi|sab theek)(?:\s|$)/i.test(lower) ||
-    /^(sab|all|everything)\s+(sahi|theek|correct|right|good)/i.test(lower) ||
-    /^(yes\s+please|ji\s+bilkul|ji\s+haan|haan\s+ji)/i.test(lower) ||
-    /^(bilkul|zaroor|pakka|definitely|sure|confirmed)$/i.test(lower);
+  const raw = String(text ?? '').toLowerCase();
+  if (!raw.trim()) return false;
+  if (AFFIRM_NEGATIVE.test(raw) || AFFIRM_NEGATIVE_DEV.test(raw)) return false;
+  const lower = normalizeAffirmation(text);
+  if (!lower) return false;
+  const tokens = lower.split(' ').filter(Boolean);
+  if (tokens.length > 6) return false;
+  if (!AFFIRM_STARTERS.has(tokens[0])) return false;
+  return tokens.every((t, i) => i === 0 || AFFIRM_TAIL.has(t));
 };
 
 const isConfirmationNegative = (text) => {
@@ -921,6 +989,16 @@ const isBareNoChangeResponse = (text) => {
     /^(sab|all|everything)\s+(hai|sahihai|theekhai|sethai)$/i.test(lower) ||
     /^(nothing|no)\s+(to\s+change|changes?)$/i.test(lower) ||
     /^(nahi|nahin|no)[,.\s]+(mujhe|kuch)\s+(nahi|nahin|no)\s*(change|badalna|karna)?$/i.test(lower);
+};
+
+// "Nahi, sab theek hai" / "nahi, kuch nahi" / "sab theek hai" — a no-change
+// answer: the listing is already correct, so this affirms it (submit now)
+// rather than requesting a change.
+const isNoChangeAllGood = (text) => {
+  const lower = text.toLowerCase().trim().replace(/[.,!?]/g, '');
+  return /^(nahi|nahin|no|nope)[,.\s]+(sab|all|everything)\s+(sahi|theek|correct|right|good|set)/i.test(lower) ||
+    /^(nahi|nahin|no|nope)[,.\s]+(kuch|nothing|no)\s*(nahi|nahin|no)?$/i.test(lower) ||
+    /^(sab|all|everything)\s+(sahi|theek|correct|right|good|set)\s*(hai)?$/i.test(lower);
 };
 
 const applySellIntentOverride = (text, extracted) => {
@@ -1102,7 +1180,273 @@ const applySlotFallbacks = (text, extracted, session) => {
   }
 };
 
+// ── Grade-answer normalization ─────────────────────────────────────────────
+// Speech-to-text renders a grade answer in many shapes: "Grade A", "A grade",
+// "quality A", "grade, a", "grade-a", "Grade A.", "ग्रेड ए". Every one of them
+// must land on the quality slot — otherwise the agent drops the answer, never
+// fills quality and re-asks the same question forever. One normalizer strips
+// punctuation and Devanagari so the matchers below do not depend on word order.
+const GRADE_WORD = '(?:grade|quality|kism|kisam|darja)';
+const GRADE_LETTER = '(a|ay|ey|ai|aay|b|bee|be|bi|c|see|sea|ci|si)';
+const GRADE_TAIL = '(?:\\s+(?:hai|hain|he|is|ji))?';
+const GRADE_LETTER_MAP = {
+  a: 'A', ay: 'A', ey: 'A', ai: 'A', aay: 'A',
+  b: 'B', bee: 'B', be: 'B', bi: 'B',
+  c: 'C', see: 'C', sea: 'C', ci: 'C', si: 'C',
+};
+const DEV_GRADE_WORD_SRC = '\\u0917\\u094d\\u0930\\u0947\\u0921|\\u0921\\u093f\\u0917\\u094d\\u0930\\u0940|\\u0915\\u093f\\u0938\\u094d\\u092e|\\u0926\\u0930\\u091c\\u093e';
+const DEV_LETTER_SRC = '\\u0910|\\u092c\\u0940|\\u0938\\u0940';
+const DEV_GRADE_WORD = new RegExp(DEV_GRADE_WORD_SRC);
+const DEV_GRADE_WORD_G = new RegExp(DEV_GRADE_WORD_SRC, 'g');
+const DEV_LETTER_G = new RegExp(DEV_LETTER_SRC, 'g');
+
+const normalizeGradeSpeech = (raw) => {
+  let s = String(raw == null ? '' : raw).toLowerCase();
+  // Devanagari grade answers ("ग्रेड ए", bare "बी") map onto their Latin
+  // letters, but only when the utterance really is a grade answer. Hindi words
+  // that merely contain those letter signs (किसी, बीमार) must stay untouched.
+  const devRun = s.replace(/[^ऀ-ॿ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (devRun) {
+    const isGradeUtterance = DEV_GRADE_WORD.test(devRun)
+      || devRun.replace(DEV_GRADE_WORD_G, '').replace(DEV_LETTER_G, '').replace(/\s+/g, ' ').trim() === '';
+    if (isGradeUtterance) {
+      s = s
+        .replace(new RegExp(DEV_GRADE_WORD_SRC, 'g'), ' grade ')
+        .replace(/ए/g, ' a ')
+        .replace(/बी/g, ' b ')
+        .replace(/सी/g, ' c ')
+        .replace(/ऎ-ॏ।॥/g, ' ')
+        .replace(/ -ࠀ/g, ' ')
+        .replace(/ऀ-ॿ/g, ' ');
+    }
+  }
+  s = s.replace(/[^a-z0-9]+/g, ' ');
+  return s.replace(/\s+/g, ' ').trim();
+};
+
+// Parses ONLY a grade value (Grade A / B / C). Explicit grade phrases work in
+// either word order and do not depend on the quality question being pending;
+// a bare letter ("A") only counts while we are actually waiting for the
+// quality answer, so single letters can never hijack another slot.
+const parseGradeAnswer = (text, askedQuality) => {
+  const n = normalizeGradeSpeech(text);
+  if (!n) return null;
+  const letterOf = (raw) => GRADE_LETTER_MAP[raw] || null;
+  const explicit = new RegExp(`\\b${GRADE_WORD}\\s+${GRADE_LETTER}${GRADE_TAIL}\\b`).exec(n)
+    || new RegExp(`\\b${GRADE_LETTER}\\s+${GRADE_WORD}${GRADE_TAIL}\\b`).exec(n);
+  if (explicit) {
+    const g = letterOf(explicit[1]);
+    if (g) return `Grade ${g}`;
+  }
+  if (askedQuality) {
+    const bare = new RegExp(`^${GRADE_LETTER}${GRADE_TAIL}$`).exec(n);
+    if (bare) {
+      const g = letterOf(bare[1]);
+      if (g) return `Grade ${g}`;
+    }
+  }
+  return null;
+};
+
+// True when the whole utterance is nothing but a grade answer. Such a turn
+// must not write into any other slot: the word detectors would otherwise store
+// "B Grade" / "C" as the location or the farmer name.
+const isPureGradeAnswer = (text, askedQuality) => {
+  const n = normalizeGradeSpeech(text);
+  if (!n) return false;
+  if (new RegExp(`^(?:${GRADE_WORD}\\s+${GRADE_LETTER}|${GRADE_LETTER}\\s+${GRADE_WORD})${GRADE_TAIL}$`).test(n)) {
+    return true;
+  }
+  return !!askedQuality && new RegExp(`^${GRADE_LETTER}${GRADE_TAIL}$`).test(n);
+};
+
+// ── Correction pair: "<old value> nahi <new value>" ──────────────────────────
+// A farmer correcting something already stored usually says BOTH values:
+//   "2 kg nahi 5 kg aalu bechna hai", "Ghaziabad nahi Noida",
+//   "Grade A nahi Grade B hai", "30 nahi 35 rupaye kilo".
+// The generic extractors scan the WHOLE utterance and keep the first/last
+// match, so the OLD value wins, the correction is dropped — and the bare-name
+// fallback can swallow the whole sentence as a farmer name. Split the
+// utterance at the negation, decide which SINGLE field is being corrected, and
+// extract ONLY the new value for that field; every other slot stays null so
+// mergeListing() leaves the stored values untouched.
+const CORR_NEG = '(?:nahi|nahin|no|nope|\\u0928\\u0939\\u0940\\u0902|\\u0928\\u0939\\u0940)';
+const KNOWN_PRODUCT = /^(Tomato|Potato|Onion|Wheat|Rice|Cauliflower|Cabbage|Carrot|Peas|Apple|Banana|Mango|Maize|Cotton|Sugarcane|Soybean|Bajra|Jowar|Barley|Mustard|Groundnut|Moong|Chana|Masoor|Urad|Arhar|Mirch|Dhaniya|Jeera|Haldi|Garlic|Ginger|Brinjal|Bottle Gourd|Ridge Gourd|Parwal|Bitter Gourd|Pumpkin|Spinach|Methi)$/i;
+
+const normValue = (v) => String(v ?? '').toLowerCase().replace(/[.,!?;:'"()]/g, ' ').replace(/\s+/g, ' ').trim();
+
+// { before, after } only when the negation really separates two spoken values
+// (speech on BOTH sides). A leading "Nahi," is the correction frame, not the
+// separator, so "Nahi, 5 kilo hai" stays on the ordinary extraction path.
+const splitCorrectionPair = (raw) => {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  const stripped = text.replace(new RegExp(`^\\s*${CORR_NEG}[\\s,.;:!?)\\-]*`, 'i'), '').trim();
+  if (!stripped) return null;
+  const re = new RegExp(`(?:^|[\\s,.;:!?)\\-])(${CORR_NEG})(?=$|[\\s,.;:!?)\\-])`, 'gi');
+  let m = null;
+  let last = null;
+  while ((m = re.exec(stripped)) !== null) {
+    last = m;
+    if (m.index === re.lastIndex) re.lastIndex += 1;
+  }
+  if (!last) return null;
+  const before = stripped.slice(0, last.index).trim();
+  const after = stripped.slice(last.index + last[0].length).trim();
+  if (!before || !after) return null;
+  return { before, after };
+};
+
+// The value spoken AFTER the negation is what the farmer wants stored now, so
+// it decides the field first (content inference). Only when the new value is
+// itself ambiguous (a bare place/name) do we fall back to asking which stored
+// field the OLD value refers to.
+const inferCorrectionField = (segment) => {
+  const seg = String(segment ?? '').trim();
+  if (!seg) return null;
+  if (parseGradeAnswer(seg, true)) return 'quality';
+  if (extractPhoneFromText(seg)) return 'phone';
+  if (parsePrice(seg) != null) return 'asking_price';
+  if (parseQuantity(seg).quantity != null) return 'quantity';
+  if (detectAnyLocation(seg)) return 'location';
+  const prod = normalizeProduct(seg);
+  if (prod && KNOWN_PRODUCT.test(prod)) return 'product';
+  return null;
+};
+
+// Which stored field does the OLD half of the pair refer to?
+const matchStoredField = (rawBefore, listing) => {
+  if (!listing) return null;
+  const before = String(rawBefore ?? '').trim();
+  if (!before) return null;
+  const phone = extractPhoneFromText(before);
+  if (phone && listing.phone && phone === String(listing.phone)) return 'phone';
+  const grade = parseGradeAnswer(before, true);
+  if (grade && listing.quality && grade === listing.quality) return 'quality';
+  const qty = parseQuantity(before);
+  if (qty.quantity != null && listing.quantity != null && qty.quantity === listing.quantity) return 'quantity';
+  const price = parsePrice(before);
+  if (price != null && listing.asking_price != null && price === listing.asking_price) return 'asking_price';
+  const prod = normalizeProduct(before);
+  if (prod && listing.product && prod.toLowerCase() === String(listing.product).toLowerCase()) return 'product';
+  const beforeLoc = detectAnyLocation(before);
+  if (listing.location && (normValue(before) === normValue(listing.location)
+      || (beforeLoc && normValue(beforeLoc) === normValue(listing.location)))) return 'location';
+  const bareName = before.replace(/^(naam|name)\s+/i, '').trim();
+  if (listing.farmer_name && normValue(bareName) === normValue(listing.farmer_name)) return 'farmer_name';
+  return null;
+};
+
+const CORR_EDGE_DROP = /^(nahi|nahin|no|nope|hai|hain|ho|hun|hoon|se|mein|me|from|in|at|near|ka|ki|ke|ko|par|bhi|hi|to|ji|karo|kar|karna|karni|dena|chahiye|bechna|sell|buy|rahah|raha|rahi|hun|hoon)$/i;
+
+const titleCaseValue = (s) => s.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+// Up to three clean words with the sentence frame stripped off the edges.
+const correctionFreeValue = (raw) => {
+  const words = String(raw ?? '').replace(/[.,!?;:'"()]/g, ' ').split(/\s+/).filter(Boolean);
+  while (words.length && CORR_EDGE_DROP.test(words[0])) words.shift();
+  while (words.length && CORR_EDGE_DROP.test(words[words.length - 1])) words.pop();
+  if (!words.length || words.length > 3) return null;
+  const cand = words.join(' ');
+  if (!looksLikeCleanValue(cand, 3)) return null;
+  return cand;
+};
+
+// Same, but a canonical crop word can never be a place.
+const correctionPlaceValue = (raw) => {
+  const cand = correctionFreeValue(raw);
+  if (!cand) return null;
+  const canon = normalizeProduct(cand);
+  if (canon && KNOWN_PRODUCT.test(canon) && canon.toLowerCase() !== cand.toLowerCase()) return null;
+  return titleCaseValue(cand);
+};
+
+// Build an extracted-payload holding ONLY the corrected field. Returns null when
+// the segment carries no value for that field, which makes the caller fall back
+// to the ordinary full-utterance extraction (no behaviour change).
+const correctionExtracted = (field, raw, session) => {
+  const ex = {
+    farmer_name: null,
+    phone: null,
+    product: null,
+    quantity: null,
+    unit: null,
+    asking_price: null,
+    price_unit: null,
+    location: null,
+    quality: null,
+    intent: null,
+  };
+  const seg = String(raw ?? '').trim();
+  if (!seg) return null;
+  switch (field) {
+    case 'quality': {
+      const g = parseGradeAnswer(seg, true);
+      if (!g) return null;
+      ex.quality = g;
+      return ex;
+    }
+    case 'phone': {
+      const ph = extractPhoneFromText(seg);
+      if (!ph) return null;
+      ex.phone = ph;
+      return ex;
+    }
+    case 'quantity': {
+      const q = parseQuantity(seg);
+      const n = q.quantity != null ? q.quantity : extractStandaloneNumber(seg);
+      if (n == null) return null;
+      ex.quantity = n;
+      ex.unit = q.unit || session?.listing?.unit || 'kg';
+      return ex;
+    }
+    case 'asking_price': {
+      const p = parsePrice(seg);
+      const n = p != null ? p : extractStandaloneNumber(seg);
+      if (n == null) return null;
+      ex.asking_price = n;
+      ex.price_unit = session?.listing?.price_unit || 'kg';
+      return ex;
+    }
+    case 'product': {
+      const prod = normalizeProduct(seg);
+      if (!prod) return null;
+      ex.product = prod;
+      ex.intent = 'sell';
+      return ex;
+    }
+    case 'location': {
+      const loc = correctionPlaceValue(seg);
+      if (!loc) return null;
+      ex.location = loc;
+      return ex;
+    }
+    case 'farmer_name': {
+      const name = correctionFreeValue(seg);
+      if (!name || name.length < 2 || name.length > 30) return null;
+      ex.farmer_name = titleCaseValue(name);
+      return ex;
+    }
+    default:
+      return null;
+  }
+};
+
+const resolveCorrectionPair = (text, session) => {
+  const parts = splitCorrectionPair(text);
+  if (!parts) return null;
+  const field = inferCorrectionField(parts.after) || matchStoredField(parts.before, session?.listing);
+  if (!field) return null;
+  const extracted = correctionExtracted(field, parts.after, session);
+  if (!extracted) return null;
+  return extracted;
+};
+
 const extractTurnData = (text, session) => {
+  // "<old> nahi <new>" is an explicit single-field correction: resolve it first
+  // and return ONLY that field so no other stored value can be overwritten.
+  const corrected = resolveCorrectionPair(text, session);
+  if (corrected) return corrected;
   const extracted = extractListingFallback(text);
   if (session && session.last_asked === 'farmer_name') {
     extracted.location = null;
@@ -1129,17 +1473,128 @@ const extractTurnData = (text, session) => {
   if (phoneFromText) extracted.phone = phoneFromText;
   applyBareNumberAndCorrections(text, extracted, session);
   applySlotFallbacks(text, extracted, session);
-  // Prevent non-product answers (location/quality/name/price) from overwriting product
-  if (session.last_asked && session.last_asked !== 'product' && session.last_asked !== 'intent' && extracted.product && !/^(Tomato|Potato|Onion|Wheat|Rice|Cauliflower|Cabbage|Carrot|Peas|Apple|Banana|Mango)$/.test(extracted.product)) {
-    extracted.product = '';
+  // Defense-in-depth with the adapter's duplicate guard: a known produce word
+  // must NEVER become the farmer name, whichever extraction path proposed it
+  // (e.g. the bare-name fallback accepting "Aalu" while the name question was
+  // pending). Compare the name's canonical product (parser vocabulary:
+  // "Aalu" -> "Potato") against the STORED canonical product — never against
+  // this turn's extracted.product, which can be a false positive that reuses
+  // the name word itself ("Diya" -> product "Diya"). Also reject names that
+  // canonicalize into the manager's existing canonical produce list. Real
+  // names canonicalize to null/unchanged, so valid farmer names are
+  // preserved. Setting null means "leave the stored farmer_name alone"
+  // (same convention as product).
+  if (extracted.farmer_name) {
+    const rawName = String(extracted.farmer_name).trim();
+    const canonName = normalizeProduct(rawName);
+    const canonProduct = session?.listing?.product || null;
+    const singleWord = !/\s/.test(rawName);
+    const isKnownProduceName = !!canonName && (
+      (canonProduct && canonName.toLowerCase() === String(canonProduct).toLowerCase())
+      || (singleWord && canonName.toLowerCase() !== rawName.toLowerCase())
+      || /^(Tomato|Potato|Onion|Wheat|Rice|Cauliflower|Cabbage|Carrot|Peas|Apple|Banana|Mango)$/i.test(canonName)
+    );
+    if (isKnownProduceName) extracted.farmer_name = null;
+  }
+  // Prevent non-product answers (location/quality/name/price) from overwriting
+  // product: null means "leave the stored product alone". (An empty string
+  // would clear it, which is how a false-positive extraction wiped the product
+  // when the farmer was answering a different question, e.g. the name.)
+  // `product` may only be written when we are actually waiting for it. During
+  // confirmation nothing is being asked (last_asked is null), so free text must
+  // never land in product — a prompt echo, a stray word or the name of another
+  // field used to count as a "changed" product and re-emit the whole summary.
+  const awaitingProductAnswer = session.last_asked === 'product' || session.last_asked === 'intent';
+  const guardsProduct = session.last_asked
+    ? !awaitingProductAnswer
+    : session?.state === 'CONFIRMING';
+  if (guardsProduct && extracted.product && !/^(Tomato|Potato|Onion|Wheat|Rice|Cauliflower|Cabbage|Carrot|Peas|Apple|Banana|Mango)$/.test(extracted.product)) {
+    extracted.product = null;
   }
   if ((extracted.product || extracted.quantity != null || extracted.asking_price != null) && !extracted.intent) {
     extracted.intent = 'sell';
   }
+  const askedQuality = session?.last_asked === 'quality' || session?.pending_correction_field === 'quality';
+  // A turn that is ONLY a grade answer ("Grade A", "A grade", "quality B")
+  // carries no other slot value. The word detectors must never store the grade
+  // itself as location / farmer name / product ("B Grade", "C"). null means
+  // "leave the stored value alone" (same convention as product).
+  if (isPureGradeAnswer(text, askedQuality)) {
+    extracted.product = null;
+    extracted.location = null;
+    extracted.farmer_name = null;
+  }
+  const trimmedText = String(text).trim().replace(/[.!?]+$/, '');
+  const said = extracted.quality != null ? /^grade\s*([abc])$/i.exec(String(extracted.quality).trim()) : null;
+  const legacy = said
+    || /\bgrade\s*([abc])\b/i.exec(trimmedText)
+    || (askedQuality ? /^([abc])(?:\s+(?:hai|hain))?$/i.exec(trimmedText) : null);
+  // Quality accepts ONLY Grade A / Grade B / Grade C - arbitrary speech (a
+  // number, an unrelated word) must never populate the field, it is dropped so
+  // the agent simply re-asks. The tolerant parser accepts the same strict
+  // patterns PLUS the spoken forms the old regex rejected: "A grade",
+  // "quality A", "grade, a", "grade-a", "ग्रेड ए". Every previously accepted
+  // answer still resolves through `legacy`, so nothing regresses.
+  extracted.quality = parseGradeAnswer(text, askedQuality)
+    || (legacy ? `Grade ${legacy[1].toUpperCase()}` : null);
   return extracted;
 };
 
 const farmerMsg = (language, hi, en) => (isHiLang(language) ? hi : en);
+
+// Submit the finished listing and return the terminal result. Called on the
+// FIRST clear affirmative during confirmation — single-stage confirmation:
+// "Haan sab sahi hai" creates the listing immediately and returns SUCCESS.
+// There is no second "Kuch badalna hai?" prompt; a wrong detail is reported
+// through the correction flow instead ("Kya badalna hai ji?").
+const submitConfirmedListing = async (session, language, sessionId) => {
+  session.state = STATES.SUBMITTING;
+  const submittingMsg = farmerMsg(language, 'Theek hai ji, ab daal raha hoon...', 'Okay, saving it now...');
+  session.turns.push({ role: 'agent', text: submittingMsg, timestamp: Date.now() });
+
+  const result = await (_submitListingOverride?.(session.listing) ?? submitListing(session.listing));
+
+  if (result.success) {
+    session.state = STATES.SUCCESS;
+    session.listing_id = result.listing_id ?? session.listing_id ?? null;
+    session.confirmation_stage = null;
+    session.pending_correction_field = null;
+    session.last_asked = null;
+    session.last_echo_field = null;
+    // Terminal success message. Deliberately short and fixed: a longer
+    // summary here was read by the farmer as another "confirm again" prompt.
+    const successMsg = farmerMsg(
+      language,
+      SUCCESS_MESSAGE,
+      SUCCESS_MESSAGE
+    );
+    session.turns.push({ role: 'agent', text: successMsg, timestamp: Date.now() });
+    return {
+      state: STATES.SUCCESS,
+      listing: { ...session.listing },
+      listing_id: result.listing_id,
+      agent_message: successMsg,
+      missing_fields: [],
+      session_id: sessionId,
+    };
+  }
+
+  session.state = STATES.CONFIRMING;
+  session.confirmation_stage = null;
+  const errorMsg = farmerMsg(
+    language,
+    'Abhi nahi ho paya ji. Ek baar phir try karein?',
+    'It did not go through. Try again?'
+  );
+  session.turns.push({ role: 'agent', text: errorMsg, timestamp: Date.now() });
+  return {
+    state: STATES.CONFIRMING,
+    listing: { ...session.listing },
+    agent_message: errorMsg,
+    missing_fields: [],
+    session_id: sessionId,
+  };
+};
 
 const processTurn = async (sessionId, text) => {
   if (!sessionId || typeof sessionId !== 'string') {
@@ -1199,6 +1654,34 @@ const processTurn = async (sessionId, text) => {
     }
   }
 
+  // Duplicate protection at state level: an already-approved session stays
+  // SUCCESS. A repeated affirmation, a retried webhook or a re-render returns
+  // the SAME listing without resetting state or triggering another submission.
+  if (prevState === STATES.SUCCESS) {
+    const lastAgent = [...session.turns].reverse().find((t) => t.role === 'agent')?.text || SUCCESS_MESSAGE;
+    return {
+      state: STATES.SUCCESS,
+      listing: { ...session.listing },
+      listing_id: session.listing_id ?? null,
+      agent_message: lastAgent,
+      missing_fields: [],
+      session_id: sessionId,
+    };
+  }
+
+  // Guard against re-entry while the API submission is in flight.
+  if (prevState === STATES.SUBMITTING) {
+    const msg = farmerMsg(language, 'Listing submit ho raha hai ji, ek second.', 'Submitting the listing, one second.');
+    return {
+      state: STATES.SUBMITTING,
+      listing: { ...session.listing },
+      listing_id: session.listing_id ?? null,
+      agent_message: msg,
+      missing_fields: [],
+      session_id: sessionId,
+    };
+  }
+
   if (prevState === STATES.CONFIRMING) {
     if (isConfirmationCancelled(text)) {
       session.state = STATES.CANCELLED;
@@ -1218,8 +1701,38 @@ const processTurn = async (sessionId, text) => {
         session_id: sessionId,
       };
     }
+    // A recognised affirmation is checked FIRST, before any correction stage
+    // and before slot extraction, so "सब सही है" / "Han sab sahi hai" can
+    // never be merged into a field and can never re-trigger the summary.
+    if (isConfirmationAffirmative(text)) {
+      // Single-stage confirmation: the first clear "yes" submits the listing
+      // immediately — there is no second "Kuch badalna hai?" prompt. A wrong
+      // detail is reported through the correction flow instead.
+      return submitConfirmedListing(session, language, sessionId);
+    }
     // Correction field selection: user responds to "Kya badalna hai ji?"
     if (session.confirmation_stage === 'correction_field') {
+      // "Nahi, sab theek hai" / "sab theek hai" — nothing to change after all:
+      // the listing is correct, submit it now.
+      if (isNoChangeAllGood(text)) {
+        return submitConfirmedListing(session, language, sessionId);
+      }
+      // Bare "nahi" while choosing → back to the summary.
+      if (isBareNoChangeResponse(text)) {
+        session.confirmation_stage = null;
+        session.pending_correction_field = null;
+        session.last_asked = null;
+        session.last_echo_field = null;
+        const msg = generateConfirmation(session.listing, language);
+        session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
+        return {
+          state: STATES.CONFIRMING,
+          listing: { ...session.listing },
+          agent_message: msg,
+          missing_fields: [],
+          session_id: sessionId,
+        };
+      }
       const changeField = detectChangeField(text);
       if (changeField) {
         // Check if the input also contains a value (e.g. "price 15" or "5 kilo")
@@ -1309,12 +1822,19 @@ const processTurn = async (sessionId, text) => {
         session_id: sessionId,
       };
     }
-    if (isConfirmationAffirmative(text)) {
-      // Two-stage confirmation: first "haan" asks if they want changes,
-      // second "haan" enters correction flow, "nahi" submits.
-      if (session.confirmation_stage !== 'changes') {
-        session.confirmation_stage = 'changes';
-        const msg = 'Kuch badalna hai?';
+    if (isBareNoChangeResponse(text)) {
+      // "Nahi, sab theek hai" / "nahi, kuch nahi" — nothing is wrong: the
+      // listing is correct, so submit immediately (same as a plain "yes").
+      if (isNoChangeAllGood(text)) {
+        return submitConfirmedListing(session, language, sessionId);
+      }
+      // "Nahi" while choosing what to change → back to the summary.
+      if (session.confirmation_stage === 'correction_field' || session.confirmation_stage === 'correction_value') {
+        session.confirmation_stage = null;
+        session.pending_correction_field = null;
+        session.last_asked = null;
+        session.last_echo_field = null;
+        const msg = generateConfirmation(session.listing, language);
         session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
         return {
           state: STATES.CONFIRMING,
@@ -1324,94 +1844,13 @@ const processTurn = async (sessionId, text) => {
           session_id: sessionId,
         };
       }
-      // Second affirmative (YES to "Kuch badalna hai?") — enter correction flow
-      session.state = STATES.CONFIRMING;
+      // Bare "no" at the summary → the farmer wants something changed. Ask
+      // which field, then wait for the specific correction.
       session.confirmation_stage = 'correction_field';
-      session.last_echo_field = null;
-      session.last_asked = null;
-      session.pending_correction_field = null;
-      const askMsg = farmerMsg(
-        language,
-        'Ji, kya badalna hai — quantity, price, location, ya kuch aur?',
-        'What would you like to change — quantity, price, location, or something else?'
-      );
-      session.turns.push({ role: 'agent', text: askMsg, timestamp: Date.now() });
-      return {
-        state: STATES.CONFIRMING,
-        listing: { ...session.listing },
-        agent_message: askMsg,
-        missing_fields: [],
-        session_id: sessionId,
-      };
-    }
-    if (isBareNoChangeResponse(text)) {
-      // Stage 2: "nahi" to "Kuch badalna hai?" = submit
-      if (session.confirmation_stage === 'changes') {
-        session.state = STATES.SUBMITTING;
-        const submittingMsg = farmerMsg(language, 'Theek hai ji, ab daal raha hoon...', 'Okay, saving it now...');
-        session.turns.push({ role: 'agent', text: submittingMsg, timestamp: Date.now() });
-
-        const result = await (_submitListingOverride?.(session.listing) ?? submitListing(session.listing));
-
-        if (result.success) {
-          session.state = STATES.SUCCESS;
-          const qtySay = sayQty(session.listing, language);
-          const prodSay = sayProduct(session.listing.product, language);
-          const priceSay = sayPrice(session.listing, language);
-          const hiSummary = [qtySay ? `${qtySay} ${prodSay}` : null, priceSay].filter(Boolean).join(', ');
-          const enSummary = [qtySay ? `${qtySay} of ${prodSay}` : null, priceSay ? `at ${priceSay}` : null].filter(Boolean).join(' ');
-          const successMsg = farmerMsg(
-            language,
-            `Bas ho gaya ji! Listing ban gayi${hiSummary ? ` — ${hiSummary}` : ''}.\n\nNumber: ${result.listing_id}`,
-            `Done! Your listing is live${enSummary ? ` — ${enSummary}` : ''}.\n\nNumber: ${result.listing_id}`
-          );
-          session.turns.push({ role: 'agent', text: successMsg, timestamp: Date.now() });
-          return {
-            state: STATES.SUCCESS,
-            listing: { ...session.listing },
-            listing_id: result.listing_id,
-            agent_message: successMsg,
-            missing_fields: [],
-            session_id: sessionId,
-          };
-        }
-
-        session.state = STATES.CONFIRMING;
-        session.confirmation_stage = null;
-        const errorMsg = farmerMsg(
-          language,
-          `Abhi nahi ho paya ji. Ek baar phir try karein?`,
-          `It did not go through. Try again?`
-        );
-        session.turns.push({ role: 'agent', text: errorMsg, timestamp: Date.now() });
-        return {
-          state: STATES.CONFIRMING,
-          listing: { ...session.listing },
-          agent_message: errorMsg,
-          missing_fields: [],
-          session_id: sessionId,
-        };
-      }
-      // Stage 1: bare "nahi" without specifying a change → ask what to change
-      session.confirmation_stage = 'changes';
-      const msg = 'Kuch badalna hai?';
-      session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
-      return {
-        state: STATES.CONFIRMING,
-        listing: { ...session.listing },
-        agent_message: msg,
-        missing_fields: [],
-        session_id: sessionId,
-      };
-    }
-    // "nahi" during field selection or value entry → go back to confirmation
-    if ((session.confirmation_stage === 'correction_field' || session.confirmation_stage === 'correction_value')
-        && isBareNoChangeResponse(text)) {
-      session.confirmation_stage = null;
       session.pending_correction_field = null;
       session.last_asked = null;
       session.last_echo_field = null;
-      const msg = generateConfirmation(session.listing, language);
+      const msg = 'Kya badalna hai ji?';
       session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
       return {
         state: STATES.CONFIRMING,
@@ -1462,20 +1901,27 @@ const processTurn = async (sessionId, text) => {
           session_id: sessionId,
         };
       }
-      session.state = STATES.ASKING;
+      session.state = STATES.CONFIRMING;
       session.last_echo_field = null;
       const changeField = detectChangeField(text);
       let askMsg;
       if (changeField) {
+        // Field named ("naam galat hai") — ask for the new value via the
+        // correction machinery (pending_correction_field).
+        session.confirmation_stage = 'correction_value';
+        session.pending_correction_field = changeField;
         session.last_asked = changeField;
         askMsg = farmerMsg(language, 'Theek hai. ', 'Okay. ') + generateChangeQuestion(changeField, language);
       } else {
+        // Correction given without naming a field — ask which one.
+        session.confirmation_stage = 'correction_field';
+        session.pending_correction_field = null;
         session.last_asked = null;
-        askMsg = farmerMsg(language, 'Theek hai. Kya badalna hai?', 'Okay. What should I change?');
+        askMsg = farmerMsg(language, 'Kya badalna hai ji?', 'What should I change?');
       }
       session.turns.push({ role: 'agent', text: askMsg, timestamp: Date.now() });
       return {
-        state: STATES.ASKING,
+        state: STATES.CONFIRMING,
         listing: { ...session.listing },
         agent_message: askMsg,
         missing_fields: getMissingRequiredFields(session.listing),
@@ -1484,6 +1930,7 @@ const processTurn = async (sessionId, text) => {
       };
     } else {
       const prevListing = { ...session.listing };
+      const wasComplete = getMissingRequiredFields(prevListing).length === 0;
       const extracted = extractTurnData(text, session);
       // Farmer names what to change (e.g. just "price") - go straight to it.
       if (!hasExtractedData(extracted)) {
@@ -1503,11 +1950,39 @@ const processTurn = async (sessionId, text) => {
             session_id: sessionId,
           };
         }
+        // The listing was already complete and this turn carried no usable
+        // data. Re-emitting the full summary here is what produced the
+        // "Ek baar dekh lo ... Sab sahi hai?" confirmation loop.
+        if (wasComplete) {
+          const msg = shortConfirmMsg(language);
+          session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
+          return {
+            state: STATES.CONFIRMING,
+            listing: { ...session.listing },
+            agent_message: msg,
+            missing_fields: [],
+            session_id: sessionId,
+          };
+        }
       }
       session.listing = mergeListing(session.listing, extracted);
 
       const missing = getMissingRequiredFields(session.listing);
       if (missing.length === 0) {
+        const changed = JSON.stringify(session.listing) !== JSON.stringify(prevListing);
+        // Complete AND unchanged: never repeat the summary, never merge the
+        // turn into a field. Ask for a plain yes instead.
+        if (wasComplete && !changed) {
+          const msg = shortConfirmMsg(language);
+          session.turns.push({ role: 'agent', text: msg, timestamp: Date.now() });
+          return {
+            state: STATES.CONFIRMING,
+            listing: { ...session.listing },
+            agent_message: msg,
+            missing_fields: [],
+            session_id: sessionId,
+          };
+        }
         session.state = STATES.CONFIRMING;
         session.confirmation_stage = null;
         session.last_asked = null;
@@ -1648,4 +2123,7 @@ export {
   isConfirmationCancelled,
   sessions,
   setSubmitListingImpl,
+  normalizeGradeSpeech,
+  parseGradeAnswer,
+  isPureGradeAnswer,
 };

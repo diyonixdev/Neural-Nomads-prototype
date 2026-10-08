@@ -100,7 +100,7 @@ export function subscribeAuthState(callback: (user: FirebaseUser | InMemoryUser 
   authStateListeners.push(callback);
 
   if (firebaseAuth) {
-    return fbOnAuthStateChanged(firebaseAuth, (user) => {
+    return fbOnAuthStateChanged(firebaseAuth, (user: FirebaseUser | null) => {
       callback(user);
     });
   }

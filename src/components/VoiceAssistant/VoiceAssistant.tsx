@@ -21,6 +21,7 @@ import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { createVoiceAgent, buildFinalListing } from '../../services/voiceAgentCore';
 import type { ProcessTurnResult, SubmitListingResult, FinalListing } from '../../services/voiceAgentCore';
+import { getSession } from '../../services/conversationManager';
 import type { ListingData } from '../../services/conversationManager';
 import { parseVoiceIntent } from '../../services/aiService';
 import type { ParsedVoiceIntent } from '../../services/aiService';

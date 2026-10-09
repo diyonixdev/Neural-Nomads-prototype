@@ -257,7 +257,7 @@ export const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ mode, onParsedRe
     setIsSpeaking(false);
     isProcessingRef.current = false;
     // Clean session listing for a genuinely new listing/conversation
-    const s = getSession(sessionIdRef.current);
+    const s = voiceAgent.getSession(sessionIdRef.current);
     if (s) {
       s.listing.farmer_name = null;
       s.listing.phone = null;

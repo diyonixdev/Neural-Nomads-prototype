@@ -397,6 +397,10 @@ FarmDirect AI was developed around Smart India Hackathon problem statement **260
 
 ---
 
+### 🤖 FarmDirect AI Knowledge Assistant (RAG-Based Judge Assistant)
+
+[🚀 Launch Chatbot](https://farm-direct-ai---chat-botgit-bswjzfvdm3k3s5qwfrann5.streamlit.app/)
+
 ## ⭐ Why FarmDirect AI
 
 FarmDirect AI is not just about putting farmers online. It's about using AI to coordinate the fragmented journey from farm → aggregation → buyer → logistics → market.

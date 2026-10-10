@@ -296,6 +296,8 @@ export interface Order {
   vehicleId?: EntityId;
   logisticsAllocated?: Vehicle;
   shipmentId?: EntityId;
+  /** Set once a provider shipment is booked for this order. */
+  shipment?: LogisticsShipment;
   route?: Route;
   matchScore?: MatchScore;
   currentStatus: OrderStatus;
@@ -348,6 +350,134 @@ export interface Shipment {
   proofOfDeliveryUrl?: string;
   createdAt?: ISODateTimeString;
   updatedAt?: ISODateTimeString;
+}
+
+// ===================== Logistics provider contract (Delhivery) =====================
+// These mirror the `/api/logistics/*` responses exactly (server/logisticsService.mjs).
+// Kept separate from the `Shipment` interface above, which models the richer
+// in-house fulfilment ideal (vehicle, route, cold-chain telemetry) that mockData
+// still uses - a provider shipment carries none of that.
+
+/** A pickup or delivery party as the provider needs it. All six fields required. */
+export interface ShipmentParty {
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  /** 6-digit Indian pincode. */
+  pin: string;
+  /** 10-digit Indian mobile; +91 / 0091 prefixes and spaces are normalised server-side. */
+  phone: string;
+}
+
+/** Request body for POST /api/logistics/create-shipment and /validate-shipment. */
+export interface ShipmentRequest {
+  orderId: string;
+  pickup?: Partial<ShipmentParty> & { warehouseName?: string };
+  delivery: ShipmentParty;
+  commodity?: string;
+  quantityKg?: number;
+  paymentMode?: 'Prepaid' | 'COD';
+  /** Required and > 0 when paymentMode is 'COD'. */
+  codAmount?: number;
+  sellerGstTin?: string;
+  hsnCode?: string;
+  /** Set false to book without a stored order (otherwise an unknown orderId 404s). */
+  requireOrder?: boolean;
+}
+
+/** A booked shipment, as returned by create-shipment and stored on the order. */
+export interface LogisticsShipment {
+  provider: 'delhivery';
+  /** Airway bill - the provider's tracking number, and the id for track/cancel. */
+  awb: string;
+  orderRef: string;
+  refNum: string | null;
+  status: ShipmentStatus;
+  paymentMode: 'Prepaid' | 'COD';
+  codAmount: number;
+  quantityKg: number;
+  weightGrams: number;
+  commodity: string;
+  shippingMode: string;
+  sortCode: string | null;
+  uploadWbn: string | null;
+  remarks: string | null;
+  pickup: { name: string; city: string; pin: string };
+  delivery: { name: string; city: string; state: string; pin: string };
+  createdAt: ISODateTimeString;
+  updatedAt: ISODateTimeString;
+}
+
+/** One provider scan in a shipment's history. */
+export interface ShipmentTrackingEvent {
+  id: string;
+  timestamp: ISODateTimeString | null;
+  status: ShipmentStatus;
+  /** Raw provider wording, before normalisation to ShipmentStatus. */
+  providerStatus: string | null;
+  location: string | null;
+  note: string | null;
+}
+
+/** Live tracking for one AWB (GET /api/logistics/track/:awb). */
+export interface ShipmentTracking {
+  provider: 'delhivery';
+  awb: string | null;
+  orderRef: string | null;
+  status: ShipmentStatus;
+  providerStatus: string | null;
+  statusLocation: string | null;
+  statusUpdatedAt: ISODateTimeString | null;
+  instructions: string | null;
+  origin: string | null;
+  destination: string | null;
+  pickedUpAt: ISODateTimeString | null;
+  deliveredAt: ISODateTimeString | null;
+  expectedDeliveryAt: ISODateTimeString | null;
+  orderType: string | null;
+  chargedWeightGrams: number | null;
+  consigneeName: string | null;
+  trackingEvents: ShipmentTrackingEvent[];
+}
+
+/** GET /api/logistics/status - reports configuration only, never credentials. */
+export interface LogisticsConfigStatus {
+  provider: 'delhivery';
+  configured: boolean;
+  environment: string;
+  baseUrl: string;
+  pickupLocationConfigured: boolean;
+  sellerGstTinConfigured: boolean;
+  hsnCodeConfigured: boolean;
+}
+
+/** GET /api/logistics/serviceability?pin= - check before offering delivery. */
+export interface PincodeServiceability {
+  pin: string;
+  serviceable: boolean;
+  prepaid: boolean;
+  cod: boolean;
+  pickup: boolean;
+  district?: string | null;
+  stateCode?: string | null;
+  maxWeightKg?: number | null;
+  maxAmount?: number | null;
+}
+
+/** POST /api/logistics/cancel-shipment */
+export interface ShipmentCancellation {
+  awb: string;
+  cancelled: boolean;
+  remark: string | null;
+  orderId: string | null;
+}
+
+/** POST /api/logistics/validate-shipment - dry run, calls no provider. */
+export interface ShipmentValidation {
+  valid: boolean;
+  /** Human-readable, field-by-field; safe to show in the UI. */
+  errors: string[];
 }
 
 export interface DemandForecast {

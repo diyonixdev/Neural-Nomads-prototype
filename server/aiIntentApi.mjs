@@ -2108,4 +2108,10 @@ if (isMainModule) {
   });
 }
 
+// api/index.js (the Vercel serverless entry) imports this module's handler as a
+// default export. That default was added in 6117fdb and removed by a721b94's
+// revert; the named exports above came back for the Vite middleware plugin, but
+// the default did not -- so every /api/* request on Vercel died at module load.
+export default apiHandler;
+
 export { apiHandler, server };

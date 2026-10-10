@@ -124,14 +124,14 @@ try {
 
   r = await api('GET', '/api/orders');
   const stored = r.body.find((o) => o.id === bookedOrderId);
-  check('GET /api/orders exposes the shipment on the order', !!stored?.shipment?.awb, JSON.stringify(stored).slice(0, 200));
+  check('GET /api/orders exposes the shipment on the order', !!stored?.shipment?.awb, JSON.stringify(stored ?? null).slice(0, 200));
 
   r = await api('POST', '/api/logistics/cancel-shipment', { awb: '7770001112223' });
   check('POST /api/logistics/cancel-shipment cancels', r.status === 200 && r.body.cancelled === true, JSON.stringify(r.body));
 
   r = await api('GET', '/api/orders');
   const cancelled = r.body.find((o) => o.shipment?.awb === '7770001112223');
-  check('cancelled shipment status persisted on the order', cancelled?.shipment?.status === 'cancelled', JSON.stringify(cancelled?.shipment).slice(0, 200));
+  check('cancelled shipment status persisted on the order', cancelled?.shipment?.status === 'cancelled', JSON.stringify(cancelled?.shipment ?? null).slice(0, 200));
 
   // Unconfigured behaviour is verified in the unit suite; here assert no leak in logs
   check('server logs never contain the API key', !serverLog.includes('e2e-fake-token'), 'log leak');

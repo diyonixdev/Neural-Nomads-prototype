@@ -386,9 +386,7 @@ FarmDirect AI was developed around Smart India Hackathon problem statement **260
 
 ## 🌐 Demo
 
-```text
-Demo: Coming soon
-```
+[🚀 View FarmDirect AI Prototype](https://neural-nomads-prototype.vercel.app/)
 
 ---
 

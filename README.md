@@ -4,7 +4,7 @@
 
 > FarmDirect AI is a voice-first coordination platform that connects farmers and FPOs directly with buyers, replacing fragmented intermediary chains with AI-driven matching, aggregation, negotiation, and logistics.
 
-![Status](https://img.shields.io/badge/status-hackathon--prototype-orange)
+[![Status](https://img.shields.io/badge/status-hackathon--prototype-orange)](https://neural-nomads-prototype.vercel.app/)
 ![Made with React](https://img.shields.io/badge/frontend-React%20%2F%20Next.js-blue)
 ![License](https://img.shields.io/badge/license-TBD-lightgrey)
 

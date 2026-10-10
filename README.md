@@ -371,16 +371,23 @@ FarmDirect AI was developed around Smart India Hackathon problem statement **260
 
 ---
 
-## 📸 Screenshots / Demo
+## 📸 Screenshots
 
-```markdown
-![FarmDirect AI Dashboard](./assets/dashboard.png)
-![Voice Assistant](./assets/voice-assistant.png)
-![Farmer Listing](./assets/farmer-listing.png)
-![Buyer Marketplace](./assets/buyer-marketplace.png)
-![Analytics](./assets/analytics.png)
-![Architecture](./assets/architecture.png)
-```
+![FarmDirect AI Dashboard](./assets/farmdirectdashboard.png)
+
+![Marketplace & Farmer Matches](./assets/marketplace.png)
+
+![Farmer Product Listings](./assets/farmerlisting.png)
+
+![Demand Forecasting](./assets/analytics.png)
+
+![Market Intelligence & Logistics](./assets/analytics2.png)
+
+![Harvest Revenue & Buyer Requirements](./assets/analytics3.png)
+
+![FarmDirect AI Phone Agent](./assets/phoneagent.jpeg)
+
+---
 
 ---
 
